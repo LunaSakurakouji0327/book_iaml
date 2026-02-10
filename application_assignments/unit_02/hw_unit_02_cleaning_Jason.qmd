@@ -1,6 +1,6 @@
 ---
 title: "Homework Unit 2: EDA Cleaning"
-author: "Your name here"
+author: "JIANGRAN GU"
 date: "`r lubridate::today()`"
 format: 
   html: 
@@ -97,7 +97,8 @@ This assignment will use the Ames Housing Prices Dataset (also seen in Unit 2 of
 Read in the `ames_raw_class.csv` data below.
 
 ```{r}
-
+data <- read_csv(here::here(path_data, "ames_raw_class.csv")) |>
+  glimpse()
 ```
 
 ### Select variables
@@ -107,7 +108,9 @@ We will explore a different set of variables than those demoed in the course tex
 `SalePrice`, `Garage Area`, `Neighborhood`, `MS SubClass`, `Total Bsmt SF`, `Bsmt Qual`, `Central Air`, `TotRms AbvGrd`, `Fireplaces`, and `Fireplace Qu`.
 
 ```{r}
-
+data <- data |> 
+  janitor::clean_names()|>
+  glimpse()
 ```
 
 ### Review the data dictionary
@@ -125,10 +128,65 @@ Remember that you can use `glimpse()`, `skim_some()`, `print()`, `head()`, and/o
 Confirm that all variables are read in as the expected class. Remember that we class nominal and ordinal variables as factors and interval and ratio variables as numeric. Below the code chunk, type some observations you have about the observed variable classes compared to descriptions in the data dictionary. Make any appropriate adjustments to variable class below using `mutate()`, `factor()`, or `as.numeric()`.
 
 ```{r}
-
+# Adjust variable classes to match the data dictionary
+data_clean <- data %>% 
+  mutate(
+    # Nominal variables converted to factors
+    ms_sub_class = factor(ms_sub_class),
+    ms_zoning = factor(ms_zoning),
+    street = factor(street),
+    alley = factor(alley),
+    land_contour = factor(land_contour),
+    lot_config = factor(lot_config),
+    neighborhood = factor(neighborhood),
+    condition_1 = factor(condition_1),
+    condition_2 = factor(condition_2),
+    bldg_type = factor(bldg_type),
+    house_style = factor(house_style),
+    roof_style = factor(roof_style),
+    roof_matl = factor(roof_matl),
+    exterior_1st = factor(exterior_1st),
+    exterior_2nd = factor(exterior_2nd),
+    mas_vnr_type = factor(mas_vnr_type),
+    foundation = factor(foundation),
+    heating = factor(heating),
+    central_air = factor(central_air),
+    garage_type = factor(garage_type),
+    misc_feature = factor(misc_feature),
+    sale_type = factor(sale_type),
+    sale_condition = factor(sale_condition),
+    
+    # "Discrete" variable that functions better as a Nominal Factor (Seasonality)
+    mo_sold = factor(mo_sold),
+    
+    # Ordinal variables mapped to Ordered Factors (Specifying levels is crucial)
+    # Standard Quality: Po < Fa < TA < Gd < Ex
+    across(c(exter_qual, exter_cond, bsmt_qual, bsmt_cond, heating_qc, 
+             kitchen_qual, fireplace_qu, garage_qual, garage_cond, pool_qc), 
+           ~ factor(.x, levels = c("Po", "Fa", "TA", "Gd", "Ex"), ordered = TRUE)),
+    
+    # Specific Ordinal Variables with unique scales
+    lot_shape = factor(lot_shape, levels = c("IR3", "IR2", "IR1", "Reg"), ordered = TRUE),
+    utilities = factor(utilities, levels = c("ELO", "NoSeWa", "NoSewr", "AllPub"), ordered = TRUE),
+    land_slope = factor(land_slope, levels = c("Sev", "Mod", "Gtl"), ordered = TRUE),
+    bsmt_exposure = factor(bsmt_exposure, levels = c("No", "Mn", "Av", "Gd"), ordered = TRUE),
+    bsmt_fin_type_1 = factor(bsmt_fin_type_1, levels = c("Unf", "LwQ", "Rec", "BLQ", "ALQ", "GLQ"), ordered = TRUE),
+    bsmt_fin_type_2 = factor(bsmt_fin_type_2, levels = c("Unf", "LwQ", "Rec", "BLQ", "ALQ", "GLQ"), ordered = TRUE),
+    electrical = factor(electrical, levels = c("Mix", "FuseP", "FuseF", "FuseA", "SBrkr"), ordered = TRUE),
+    functional = factor(functional, levels = c("Sal", "Sev", "Maj2", "Maj1", "Mod", "Min2", "Min1", "Typ"), ordered = TRUE),
+    garage_finish = factor(garage_finish, levels = c("Unf", "RFn", "Fin"), ordered = TRUE),
+    paved_drive = factor(paved_drive, levels = c("N", "P", "Y"), ordered = TRUE),
+    fence = factor(fence, levels = c("MnWw", "GdWo", "MnPrv", "GdPrv"), ordered = TRUE),
+    
+    # Overall Quality/Condition are numeric integers (1-10) but function as Ordinal.
+    # We can leave them as numeric for regression or convert to ordered factors depending on analysis goals.
+    # Here, we ensure they are at least integers (since they were <dbl>).
+    overall_qual = as.integer(overall_qual),
+    overall_cond = as.integer(overall_cond)
+  )
 ```
 
-**Variable class notes:** *Enter your notes here*
+**Variable class notes:** *we change nominal and ordinal factor as facotrs while others as dbl*
 
 Type your text observation between the two single asterisks (`*`) above. Asterisks are a way to format text in markdown files that is displayed once the completed file is "rendered" to a html format. Surrounding text with **two asterisks per side** creates **bold** text, while surrounding text with *one asterisk per side* creates *italicized* text. Italicizing makes your text responses a little easier for us to find while grading homework, and we are grateful to you for using it.
 
@@ -137,27 +195,121 @@ Type your text observation between the two single asterisks (`*`) above. Asteris
 Use an appropriate technique to review missing data at this stage. Clearly document missing data ("missingness") across each variable in the dataset. For variables with high missingness, write code that allows you to visually inspect all observations of missing data (for each such variable). Using information from related variables and the data dictionary to guide you, speculate (in prose) why data may be missing. Clean variables with high missingness using `mutate()`, `replace_na()`, and `fct_relevel()` if you believe any of the NAs are not really missing but instead problems with how the data were coded (e.g., see the example of this in the book.)
 
 ```{r}
+# Calculate missingness for all variables
+missing_summary <- data_clean %>%
+  summarise(across(everything(), ~ sum(is.na(.)))) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "n_missing") %>%
+  mutate(percent_missing = (n_missing / nrow(data_clean)) * 100) %>%
+  filter(n_missing > 0) %>%
+  arrange(desc(percent_missing))
+
+# Print the summary
+print(missing_summary)
+```
+
+```{r}
+data_clean_na <- data_clean %>%
+  mutate(
+
+    across(
+      c(pool_qc, misc_feature, alley, fence, fireplace_qu,
+        garage_type, garage_finish, garage_qual, garage_cond,
+        bsmt_qual, bsmt_cond, bsmt_exposure,
+        bsmt_fin_type_1, bsmt_fin_type_2),
+      ~ fct_na_value_to_level(.x, "None")
+    ),
+
+
+    across(
+      c(pool_qc, fireplace_qu, garage_qual, garage_cond,
+        bsmt_qual, bsmt_cond, exter_qual, exter_cond,
+        heating_qc, kitchen_qual),
+      ~ fct_relevel(.x, "None", "Po", "Fa", "TA", "Gd", "Ex")
+    ),
+
+
+    bsmt_exposure =
+      fct_relevel(bsmt_exposure, "None", "No", "Mn", "Av", "Gd"),
+
+    bsmt_fin_type_1 =
+      fct_relevel(bsmt_fin_type_1, "None", "Unf", "LwQ", "Rec", "BLQ", "ALQ", "GLQ"),
+
+    bsmt_fin_type_2 =
+      fct_relevel(bsmt_fin_type_2, "None", "Unf", "LwQ", "Rec", "BLQ", "ALQ", "GLQ"),
+
+    garage_finish =
+      fct_relevel(garage_finish, "None", "Unf", "RFn", "Fin"),
+
+    fence =
+      fct_relevel(fence, "None", "MnWw", "GdWo", "MnPrv", "GdPrv")
+  )
 
 ```
 
-**Missing data notes:** *Enter your notes here*
+**Missing data notes:** *pool_qc, misc_feature, alley, fence, fireplace_qu, garage_type, bsmt_qual NA means no. lot_frantage, mas_vnr_type, mas_vnr_area NA means missing value*
 
 ### Numeric variables
 
 Explore `min` and `max` values for numeric variables, recording notes on any observations that look suspicious or potentially invalid. Use the data dictionary and associated variables to help you decide whether suspicious observations may represent (in)valid responses.
 
 ```{r}
+numeric_vars <- data_clean_na %>% select(where(is.numeric))
+
+summary_stats <- numeric_vars %>%
+  summarise(across(everything(), list(min = min, max = max), na.rm = TRUE))
+
+print(summary_stats)
 
 ```
 
-**Numeric variable notes:** *Enter your notes here*
+**Numeric variable notes:** \*We explored the minimum and maximum values for numeric variables in the dataset to identify potential data quality issues. Most variables show ranges consistent with typical residential properties; however, several observations appear suspicious or potentially invalid:
+
+Kitchen above grade (kitchen_abv_gr) = 0 – Almost certainly invalid, as a house without a kitchen is unrealistic.
+
+Bedrooms above grade (bedroom_abv_gr) = 0 – Possibly valid for small studio-like units, but warrants verification.
+
+Garage year built (garage_yr_blt) = 1896 – Extremely early compared to most houses; likely a data entry error.
+
+Lot area (lot_area) = 215,245 sqft – Very large; may be valid for estate properties but should be verified.
+
+Sale price (sale_price) = 12,789 – Extremely low; likely an outlier or recording error.
+
+Other extreme values, such as very large living areas, basement areas, or pool areas, are plausible for high-end properties and may be valid responses, though they represent extreme observations in the dataset.
+
+In conclusion, some suspicious observations likely reflect data entry errors (kitchen_abv_gr = 0, garage_yr_blt = 1896), while others may represent valid but extreme cases (lot_area = 215,245 sqft, gr_liv_area = 5642 sqft). Further investigation or contextual verification is recommended before making analytical decisions.\*
 
 ### Categorical variables
 
 Use `print()` and `levels()` print the levels of each categorical variable. You might consider using `walk()` to do all the categorical variables at once! You can use `tidy_responses()` (a function from John) to convert all responses to snake_case. Check to make sure all levels converted properly. If needed, correct any response levels with conversion errors using `mutate()` and `fct_recode()`. Document your observations for categorical levels.
 
 ```{r}
+# 1. Define the cleaning function
+tidy_responses <- function(x) {
+  # If input is a factor, relabel levels to preserve order (critical for ordinals)
+  if(is.factor(x)) {
+    fct_relabel(x, ~ .x %>%
+      str_to_lower() %>%                    # Lowercase
+      str_replace_all("[^a-z0-9]+", "_") %>% # Replace non-alphanumeric with _
+      str_remove_all("^_|_$")               # Remove leading/trailing _
+    )
+  } else {
+    # If character, just clean the string
+    x %>%
+      str_to_lower() %>%
+      str_replace_all("[^a-z0-9]+", "_") %>%
+      str_remove_all("^_|_$")
+  }
+}
 
+# 2. Apply to all factor variables
+ames_data_clean_levels <- data_clean_na %>% 
+  mutate(across(where(is.factor), tidy_responses))
+
+# 3. Verify levels using walk()
+# This prints the levels of every factor variable to the console for inspection
+ames_data_clean_levels %>% 
+  select(where(is.factor)) %>% 
+  walk(function(column) print(levels(column)))
 ```
 
 **Categorical variable notes:** *Enter your notes here*
@@ -171,7 +323,23 @@ Now that we have completed our data cleaning, we will split our data into train 
 Assign 25% of the data to be our validation set. Stratify this split on the `sale_price` variable.
 
 ```{r}
+# Load tidymodels library
+library(tidymodels)
 
+# Set seed for reproducibility
+set.seed(20211121)
+
+# Generate the initial split
+splits <- data_clean_na %>% 
+  initial_split(prop = 3/4, strata = sale_price, breaks = 4)
+
+# Extract the training and testing (validation) sets
+ames_train <- training(splits)
+ames_val   <- testing(splits)
+
+# Verify the split sizes
+dim(ames_train)
+dim(ames_val)
 ```
 
 ### Save cleaned files
@@ -179,7 +347,11 @@ Assign 25% of the data to be our validation set. Stratify this split on the `sal
 Save out your cleaned train and validation sets as csv files and name them `hw_unit_2_trn.csv` and `hw_unit_2_val.csv`.
 
 ```{r}
+# Save the training set
+write_csv(ames_train, "hw_unit_2_trn.csv")
 
+# Save the validation set
+write_csv(ames_val, "hw_unit_2_val.csv")
 ```
 
 ## Save and render

@@ -82,15 +82,15 @@ Lets get started!
 
 ```{r}
 #| message: false
-
+library(tidymodels)
+library(tidyverse)
+options(conflicts.policy = "depends.ok")
+library(corrplot)
 ```
 
 ### Load required packages and source
 
 Add packages (only what you need!)
-
-```{r}
-```
 
 Source any function scripts (John's are already sourced for you, but you
 can change these or add your own function scripts too!)
@@ -113,8 +113,8 @@ options(tibble.width = Inf, dplyr.print_max=Inf)
 
 ### Paths
 
-```{r path}
-path_data <- "homework/unit_03"
+```{r}
+setwd("C:/Users/gujia/Desktop/github/book_iaml/application_assignments/unit_03")
 ```
 
 ### Load data
@@ -126,16 +126,22 @@ Use `here::here()` and relative path for your data. Make sure your iaml
 project is open
 
 ```{r load-data}
-data_trn <- 
-data_val <- 
-data_test <- 
+data_trn <- read_csv("ames_train_cln.csv")
+data_val <- read_csv("ames_val_cln.csv")
+data_test <- read_csv("ames_test_cln.csv")
 ```
 
 set appropriate variable classes (remember nominal and ordinal variables
 should be factors!)
 
 ```{r}
-
+data_trn <- data_trn|>
+  mutate(across(where(is.character),factor))|>
+  mutate(overall_qual = factor(overall_qual, levels = 1:10),
+         garage_qual = suppressWarnings
+         (fct_relevel(garage_qual,c("none", "po", "fa","ta", "gd", "ex")
+         )))|>
+  glimpse()
 ```
 
 ### Create tracking tibble
@@ -144,7 +150,7 @@ Create a tibble to track the validation errors across various model
 configurations.
 
 ```{r}
-
+error_val <- tibble(model = character(), rmse_val = numeric())
 ```
 
 ## LM Model building instructions
@@ -191,6 +197,11 @@ Informed by EDA from your modeling EDA script, create a recipe for your
 first model.
 
 ```{r}
+rec_1 <- 
+  recipe(sale_price ~ gr_liv_area + lot_area + year_built + garage_cars, 
+         data = data_trn) |> 
+  step_impute_median(garage_cars) |> 
+  step_YeoJohnson(lot_area, gr_liv_area, year_built, garage_cars)
 ```
 
 ### Training feature matrix
@@ -199,7 +210,8 @@ Use the `prep()` function to prep your recipe
 
 ```{r}
 
-rec_prep <- 
+rec_prep_1 <- rec_1 |>
+  prep(data_trn)
   
 ```
 
@@ -207,7 +219,8 @@ Use the `bake()` function to generate the feature matrix of the training
 data using `rec_prep`
 
 ```{r}
-
+feat_trn_1 <- rec_prep_1 |>
+  bake(NULL)
 ```
 
 ### Fit your model
@@ -216,6 +229,10 @@ Fit a linear model predicting `sale_price` from your training feature
 matrix
 
 ```{r}
+fit_lm_4yj <-
+  linear_reg()|>
+  set_engine("lm")|>
+  fit(sale_price ~., data = feat_trn_1)
 ```
 
 ### Validation feature matrix
@@ -224,6 +241,8 @@ Use `bake()` to generate the feature matrix of the validation data that
 we will use to assess your model.
 
 ```{r}
+feat_val_1 <- rec_prep_1 |>
+  bake(data_val)
 ```
 
 ### Assess your model
@@ -232,6 +251,15 @@ Use the `rmse_vec()` function to calculate the validation error (RMSE)
 of your model. Add this value to your validation error tracking tibble
 
 ```{r}
+error_val <- error_val |>
+  bind_rows(tibble(model = "4 features linear model YeoJohn",
+                   rmse_val = rmse_vec(feat_val_1$sale_price,
+                                       predict(fit_lm_4yj,
+                                               feat_val_1)$.pred)))
+```
+
+```{r}
+error_val
 ```
 
 ### Visualize performance
@@ -240,6 +268,18 @@ Visualize the relationship between raw and predicted sale price in your
 validation set using the `plot_truth()` function.
 
 ```{r}
+plot_truth <- function(truth, estimate) {
+  ggplot(mapping = aes(x = truth, y = estimate)) + 
+    geom_abline(lty = 2, color = "red") + 
+    geom_point(alpha = 0.5) + 
+    labs(y = "predicted outcome", x = "outcome") +
+    coord_obs_pred()   # scale axes uniformly (from tune package)
+}
+```
+
+```{r}
+plot_truth(truth = feat_val_1$sale_price,
+           estimate = predict(fit_lm_4yj, feat_val_1)$.pred)
 ```
 
 ## LM 2
@@ -254,6 +294,14 @@ Informed by EDA from your modeling EDA script, create a recipe for your
 next model.
 
 ```{r}
+rec_2 <- recipe(sale_price  ~ gr_liv_area + lot_area + year_built + garage_cars + ms_zoning + overall_qual, data = data_trn)|>
+ step_mutate(ms_zoning = fct_collapse(ms_zoning,
+                                       "residential" = c("rh","rm","rl"),
+                                       "commercial" = c("a", "c", "i"),
+                                       "floating" = "fv"),
+              overall_qual = as.numeric(overall_qual)) |>
+  step_dummy(ms_zoning) |> 
+  step_interact(~ overall_qual:year_built)
 ```
 
 ### Training feature matrix
@@ -261,12 +309,16 @@ next model.
 Use the `prep()` function to prep your recipe
 
 ```{r}
+rec_prep_2 <- rec_2 |>
+  prep(data_trn)
 ```
 
 Use the `bake()` function to generate the feature matrix of the training
 data.
 
 ```{r}
+feat_trn_2 <- rec_prep_2 |>
+  bake(NULL)
 ```
 
 ### Fit your model
@@ -275,6 +327,11 @@ Fit a linear model predicting raw `sale_price` from your training
 feature matrix.
 
 ```{r}
+fit_lm_interaction <- 
+  linear_reg() |>
+  set_engine("lm")|>
+  fit(sale_price ~ .,
+      data = feat_trn_2)
 ```
 
 ### Validation feature matrix
@@ -283,6 +340,8 @@ Use `bake()` to generate the feature matrix of the validation data that
 we will use to assess your model.
 
 ```{r}
+feat_val_2 <- rec_prep_2 |>
+  bake(data_val)
 ```
 
 ### Assess your model
@@ -291,6 +350,9 @@ Use `rmse_vec()` to calculate the validation error (RMSE) of your model.
 Add this value to your validation error tracking tibble.
 
 ```{r}
+error_val <- bind_rows(error_val, tibble
+                       (model = "Interaction with 6 predictors", rmse_val = rmse_vec(feat_val_2$sale_price, predict(fit_lm_interaction, feat_val_2)$.pred))) 
+error_val
 ```
 
 ### Visualize performance
@@ -299,6 +361,8 @@ Visualize the relationship between raw and predicted sale price in your
 validation set using the plot_truth function.
 
 ```{r}
+plot_truth(truth = feat_val_2$sale_price, 
+           predict(fit_lm_interaction, feat_val_2)$.pred)
 ```
 
 ## LM 3
@@ -313,6 +377,12 @@ Informed by EDA from your modeling EDA script, create a recipe for your
 next model.
 
 ```{r}
+rec_3 <- recipe(sale_price ~ gr_liv_area + garage_cars + garage_area + total_bsmt_sf + year_built +tot_rms_abv_grd + fireplaces + overall_qual + ms_zoning, data = data_trn)|>
+  step_impute_median(garage_cars)|>
+  step_mutate(ms_zoning = fct_collapse(ms_zoning, "residential" = c("rh","rm","rl"), "commercial" = c("a", "c", "i"), "floating" = "fv"))|>
+  step_mutate(overall_qual = as.numeric(overall_qual)) |>
+  step_dummy(ms_zoning)
+
 ```
 
 ### Training feature matrix
@@ -320,12 +390,16 @@ next model.
 Use the `prep()` function to prep your recipe
 
 ```{r}
+rec_prep_3 <- rec_3 |>
+  prep(data_trn)
 ```
 
 Use the `bake()` function to generate the feature matrix of the training
 data.
 
 ```{r}
+feat_trn_3 <- rec_prep_3 |>
+  bake(NULL)
 ```
 
 ### Fit your model
@@ -334,6 +408,10 @@ Fit a linear model predicting raw `sale_price` from your training
 feature matrix.
 
 ```{r}
+fit_lm_3 <- 
+  linear_reg()|>
+  set_engine("lm")|>
+  fit(sale_price ~ ., data = feat_trn_3)
 ```
 
 ### Validation feature matrix
@@ -342,6 +420,8 @@ Use `bake()` to generate the feature matrix of the validation data that
 we will use to assess your model.
 
 ```{r}
+feat_val_3 <- rec_prep_3 |>
+  bake(data_val)
 ```
 
 ### Assess your model
@@ -350,6 +430,17 @@ Use `rmse_vec()` to calculate the validation error (RMSE) of your model.
 Add this value to your validation error tracking tibble.
 
 ```{r}
+rmse_vec(feat_val_3$sale_price,
+         predict(fit_lm_3 ,feat_val_3)$.pred)
+```
+
+```{r}
+error_val <- bind_rows(error_val, 
+                        tibble(model = "lm_3", 
+                               rmse_val = rmse_vec(feat_val_3$sale_price, 
+                                                   predict(fit_lm_3, feat_val_3)$.pred)))
+
+error_val
 ```
 
 ### Visualize performance
@@ -357,7 +448,8 @@ Add this value to your validation error tracking tibble.
 Visualize the relationship between raw and predicted sale price in your
 validation set using the plot_truth function.
 
-```{r3}
+```{r}
+plot_truth(truth = feat_val_3$sale_price, estimate = predict(fit_lm_3, feat_val_3)$.pred)
 ```
 
 ## Additional configurations
@@ -367,7 +459,151 @@ linear model configurations. Record your models' performance in your
 validation error tracking tibble.
 
 ```{r}
+#top 1
+rec <- recipe(
+  sale_price ~ gr_liv_area + garage_cars + garage_area + total_bsmt_sf +
+    neighborhood + bsmt_qual + lot_area + year_built + garage_qual +
+    tot_rms_abv_grd + fireplaces + overall_qual + bldg_type + ms_sub_class + ms_zoning + central_air + fireplace_qu ,
+  data = data_trn
+) |>
+  step_impute_median(sale_price)|>
+ 
 
+  step_impute_median(all_numeric_predictors()) %>%
+  step_mutate(
+  sale_price = if_else(
+    sale_price > quantile(sale_price, 0.97), 
+    quantile(sale_price, 0.97, na.rm = TRUE), 
+    sale_price
+  )
+) |>
+step_mutate(
+  sale_price = if_else(
+    sale_price < quantile(sale_price, 0.02), 
+    quantile(sale_price, 0.02, na.rm = TRUE), 
+    sale_price
+  )
+)|>
+
+  step_log(sale_price) |>
+ 
+
+  step_mutate(ms_zoning = fct_collapse(ms_zoning,
+                                      residential = c("rh","rm","rl"),
+                                      commercial  = c("a","c","i"),
+                                      floating    = "fv")) |>
+
+step_mutate(
+  fireplace_qu = case_when(
+    fireplace_qu == "non" ~ 0,
+    fireplace_qu == "fa"  ~ 1,
+    fireplace_qu == "ta"  ~ 2,
+    fireplace_qu == "gd"  ~ 3,
+    TRUE ~ 0
+  )
+)|>
+
+  
+  
+  step_mutate(garage_qual = case_when(
+      garage_qual %in% c("none", "po") ~ 0,
+      garage_qual == "fa" ~ 1,
+      garage_qual == "ta" ~ 2,
+      garage_qual == "gd" ~ 3,
+      garage_qual == "ex" ~ 4,
+      TRUE ~ 0
+    ))|>
+  step_mutate(ms_sub_class = factor(ms_sub_class)) |>
+step_other(ms_sub_class, threshold = 0.04)|>
+step_other(ms_zoning, threshold = 0) |>
+  step_mutate(bldg_type = fct_collapse(bldg_type,
+      single_family = "one_fam",
+      townhouse     = c("twhs_ext", "twhs_int"),
+      multi_family  = c("duplex", "two_fam")
+    ))|>
+  step_mutate(
+  house_age = 2011 - year_built
+) |>
+step_rm(year_built)|>
+
+  step_other(ms_zoning, threshold = 0.01, other = "other") |>
+
+  step_mutate(
+    bsmt_qual = recode(bsmt_qual,
+                       "non" = 0, "fa" = 1, "ta" = 2, "gd" = 3, "ex" = 4,
+                       .default = 0),
+    overall_qual = as.numeric(as.character(overall_qual)),
+    
+    garage_qual = as.numeric(as.character(garage_qual))
+  ) |>
+  step_other(neighborhood, threshold = 0.07) |>
+  
+  step_YeoJohnson(lot_area, tot_rms_abv_grd, bsmt_qual, overall_qual, garage_qual, garage_cars) |>
+  
+  step_log(house_age)|>
+  
+  step_dummy(all_nominal_predictors())|>
+
+ step_interact(
+  ~ 
+    overall_qual:gr_liv_area +
+    overall_qual:total_bsmt_sf +
+    bsmt_qual:total_bsmt_sf +
+    tot_rms_abv_grd:gr_liv_area +
+    gr_liv_area:central_air_y+
+    gr_liv_area:starts_with("bldg_type") +
+    garage_area:garage_cars +
+    gr_liv_area:neighborhood_old_town +
+    gr_liv_area:neighborhood_other +
+    tot_rms_abv_grd:overall_qual +
+    house_age:lot_area +
+    gr_liv_area:lot_area +
+    overall_qual:lot_area:gr_liv_area:tot_rms_abv_grd +
+    lot_area:gr_liv_area:tot_rms_abv_grd +
+    lot_area:gr_liv_area:tot_rms_abv_grd:neighborhood_old_town +
+    starts_with("bldg_type"):tot_rms_abv_grd +
+    lot_area:gr_liv_area:tot_rms_abv_grd:neighborhood_other+
+    starts_with("bldg_type"):tot_rms_abv_grd:gr_liv_area +
+    overall_qual:lot_area +
+    garage_cars:garage_qual +
+    garage_cars:garage_qual:garage_area +
+    gr_liv_area:tot_rms_abv_grd:lot_area +
+    total_bsmt_sf:bsmt_qual:lot_area +
+    starts_with("ms_sub_class"):overall_qual:lot_area +
+    total_bsmt_sf:gr_liv_area:lot_area:house_age:garage_cars:garage_qual:overall_qual:bsmt_qual:garage_area +
+    total_bsmt_sf:gr_liv_area:lot_area:house_age:garage_cars:overall_qual:bsmt_qual:garage_area:fireplaces+
+  fireplaces:overall_qual +  
+    fireplaces:overall_qual:total_bsmt_sf:gr_liv_area:lot_area:house_age +
+    fireplaces:fireplace_qu 
+
+)
+
+
+
+rec_prep <- rec |> 
+  prep(data_trn)
+feat_trn <- rec_prep |>
+  bake(NULL)
+feat_val <- rec_prep |> 
+  bake(data_val)
+
+fit <- 
+  linear_reg() |> 
+  set_engine("lm") |>  
+  fit(sale_price ~ ., data = feat_trn)
+error_val <- bind_rows(
+  error_val,
+  tibble(
+    model = "log(Y)",
+    rmse_val = rmse_vec(
+      truth    = exp(feat_val$sale_price),
+      estimate = exp(predict(fit, feat_val)$.pred)
+    )
+  )
+)
+
+error_val
+plot_truth(truth = feat_val$sale_price,estimate = predict(fit, feat_val)$.pred)
 ```
 
 ## Predictions
@@ -394,9 +630,9 @@ If your best model is a `knn`, don't edit anything in the next two code
 chunks and skip to the final section to save, render, etc.
 
 ```{r assign-best}
-best_model <- NULL
-best_rec <- NA
-last_name <- ""
+best_model <- fit
+best_rec <- rec
+last_name <- "Gu"
 ```
 
 ### Generate test predictions
@@ -414,6 +650,10 @@ worry. This will work well enough (but maybe not for a free lunch!!).
 ADVANCED NOTE 2: If your model used a transformation of `sale_price` you
 will also need to update this code.
 
+```{r}
+path_data <- getwd()
+```
+
 ```{pred-test}
 if (!is.null(best_model)){
   
@@ -426,7 +666,7 @@ if (!is.null(best_model)){
   
  # Generate predictions made by the best model
   test_preds <- data_test |> 
-    mutate(sale_price = predict(best_model, feat_test)$.pred) |> 
+    mutate(sale_price = exp(predict(best_model, feat_test)$.pred)) |> 
     select(pid, sale_price) #pid is the id variable to match predictions
   
   # Save predictions as a csv file with your last name in the file name

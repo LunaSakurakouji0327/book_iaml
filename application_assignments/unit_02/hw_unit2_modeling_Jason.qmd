@@ -1,0 +1,636 @@
+---
+title: "Homework Unit 2: EDA Modeling"
+author: "JIANGRAN GU"
+date: "2026/1/28"
+format: 
+  html: 
+    embed-resources: true
+    toc: true 
+    toc_depth: 4
+editor_options: 
+  chunk_output_type: console
+editor: 
+  markdown: 
+    wrap: 72
+---
+
+## Introduction
+
+Welcome to the second half of the Unit 2 EDA homework. We are glad you
+are here! As will become the standard, please enter your first and last
+name at the top of this document in the same way you did on the other
+part of this assignment.
+
+Now that you've cleaned the data, it is time to start your modeling
+exploratory data analysis (EDA). Keep in mind that cleaning and EDA are
+iterative processes -- you may uncover additional data errors at this
+stage that should be subsequently corrected in your cleaning script.
+It's worth the effort to keep these scripts separate to avoid
+accidentally gleaning information that might inappropriately guide
+transformations or other feature engineering from outside of your
+training data.
+
+## Packages, Source, Etc
+
+This code chunk loads in our tidy packages -- we always load these
+first.
+
+```{r}
+library(tidyverse) # for general data wrangling
+library(tidymodels) # for modeling
+```
+
+This code chunk will set up conflict policies to reduce errors
+associated with function conflicts.
+
+```{r}
+options(conflicts.policy = "depends.ok")
+```
+
+This code chunk loads all other packages you will need for this
+assignment.
+
+```{r}
+#| message: false
+#| warning: false
+library(kableExtra, exclude = "group_rows") # you may or may not use this one!
+library(cowplot, include.only = c("plot_grid", "theme_half_open"))
+library(corrplot, include.only = "corrplot.mixed") # or just use namespace 
+```
+
+Source John's function scripts.
+
+```{r}
+#| message: false
+#| warning: false
+source("https://github.com/jjcurtin/lab_support/blob/main/fun_eda.R?raw=true")
+source("https://github.com/jjcurtin/lab_support/blob/main/fun_plots.R?raw=true")
+```
+
+Set up some other environment settings.
+
+```{r}
+options(tibble.width = Inf, tibble.print_max = Inf)
+theme_set(theme_half_open()) # maybe you prefer this to classic theme?
+```
+
+In the chunk below, set path_data to the location of your cleaned data
+files.
+
+```{r}
+path_data <- "application_assignments/unit_02"
+```
+
+## Read and set up data
+
+### Read data
+
+Load the cleaned training dataset and do skim/glimpse it to get
+oriented.
+
+```{r}
+path_data <- "application_assignments/unit_02"
+trn_data <- read_csv(here::here(path_data, "hw_unit_2_trn.csv"))
+glimpse(trn_data)
+```
+
+### Set up variable classes
+
+As before, set up all categorical variables as factors (and confirm
+order if needed) and set up interval/ration variables as numeric.
+
+```{r}
+# Set up variable classes
+trn_data_classed <- trn_data %>%
+  mutate(
+    # 1. Nominal Variables -> Factors [cite: 10, 12, 44, 58, 63, 74, 87, 99, 131, 149, 168, 176, 206, 215, 224, 236, 253, 277, 349, 369, 428, 494, 509, 529]
+    # Note: ms_sub_class is numeric codes but is defined as Nominal 
+    # mo_sold is discrete but often treated as categorical (seasonality) [cite: 507]
+    across(c(ms_sub_class, ms_zoning, street, alley, land_contour, lot_config,
+             neighborhood, condition_1, condition_2, bldg_type, house_style,
+             roof_style, roof_matl, exterior_1st, exterior_2nd, mas_vnr_type,
+             foundation, heating, central_air, garage_type, misc_feature,
+             sale_type, sale_condition, mo_sold), factor),
+
+    # 2. Ordinal Variables -> Ordered Factors
+    # specifying levels ensures the correct rank (e.g., Poor < Excellent)
+    
+    # Shapes and Slopes
+    lot_shape = factor(lot_shape, levels = c("Reg", "IR1", "IR2", "IR3"), ordered = TRUE), # [cite: 65]
+    land_slope = factor(land_slope, levels = c("Gtl", "Mod", "Sev"), ordered = TRUE), # [cite: 97]
+    
+    # Utilities: ELO (Electricity Only) is lowest
+    utilities = factor(utilities, levels = c("ELO", "NoSeWa", "NoSewr", "AllPub"), ordered = TRUE), # [cite: 82]
+    
+    # 1-10 Ratings [cite: 182, 193]
+    overall_qual = factor(overall_qual, levels = 1:10, ordered = TRUE),
+    overall_cond = factor(overall_cond, levels = 1:10, ordered = TRUE),
+    
+    # Standard Quality Scale: Po < Fa < TA < Gd < Ex
+    # Applied to Exterior, Heating, Kitchen
+    across(c(exter_qual, exter_cond, heating_qc, kitchen_qual),
+           ~ factor(., levels = c("Po", "Fa", "TA", "Gd", "Ex"), ordered = TRUE)), # [cite: 263, 362, 392]
+    
+    # Structural Missingness Variables (Where "None" is the bottom level)
+    # Basement Ratings [cite: 290, 298]
+    bsmt_qual = factor(bsmt_qual, levels = c("None", "Po", "Fa", "TA", "Gd", "Ex"), ordered = TRUE),
+    bsmt_cond = factor(bsmt_cond, levels = c("None", "Po", "Fa", "TA", "Gd", "Ex"), ordered = TRUE),
+    
+    # Basement Exposure [cite: 307]
+    bsmt_exposure = factor(bsmt_exposure, levels = c("None", "No", "Mn", "Av", "Gd"), ordered = TRUE),
+    
+    # Basement Finish Types [cite: 315, 331]
+    bsmt_fin_type_1 = factor(bsmt_fin_type_1, levels = c("None", "Unf", "LwQ", "Rec", "BLQ", "ALQ", "GLQ"), ordered = TRUE),
+    bsmt_fin_type_2 = factor(bsmt_fin_type_2, levels = c("None", "Unf", "LwQ", "Rec", "BLQ", "ALQ", "GLQ"), ordered = TRUE),
+    
+    # Electrical [cite: 372]
+    electrical = factor(electrical, levels = c("Mix", "FuseP", "FuseF", "FuseA", "SBrkr"), ordered = TRUE),
+    
+    # Functionality [cite: 400]
+    functional = factor(functional, levels = c("Sal", "Sev", "Maj2", "Maj1", "Mod", "Min2", "Min1", "Typ"), ordered = TRUE),
+    
+    # Garage & Fireplace Ratings [cite: 419, 440, 449]
+    fireplace_qu = factor(fireplace_qu, levels = c("None", "Po", "Fa", "TA", "Gd", "Ex"), ordered = TRUE),
+    garage_finish = factor(garage_finish, levels = c("None", "Unf", "RFn", "Fin"), ordered = TRUE),
+    garage_qual = factor(garage_qual, levels = c("None", "Po", "Fa", "TA", "Gd", "Ex"), ordered = TRUE),
+    garage_cond = factor(garage_cond, levels = c("None", "Po", "Fa", "TA", "Gd", "Ex"), ordered = TRUE),
+    
+    # Other Ordinals [cite: 467, 475, 483]
+    paved_drive = factor(paved_drive, levels = c("N", "P", "Y"), ordered = TRUE),
+    pool_qc = factor(pool_qc, levels = c("None", "Fa", "TA", "Gd", "Ex"), ordered = TRUE),
+    fence = factor(fence, levels = c("None", "MnWw", "GdWo", "MnPrv", "GdPrv"), ordered = TRUE)
+  )
+
+# Verify the changes
+glimpse(trn_data_classed)
+```
+
+## 4 Univariate Distributions
+
+### Numeric variables
+
+First examine the univariate distributions of your numeric variables.
+While you can use multiple strategies to examine these data
+(quantitative and visual), you must also use `map()` to iterate through
+all numeric variables and create a `plot_grid` in a single piped chain.
+Describe what you discover about your data.
+
+```{r}
+library(cowplot)
+
+# Create a grid of univariate histograms for all numeric variables
+trn_data_classed %>%
+  select(where(is.numeric)) %>%       # Select only numeric columns
+  names() %>%                         # Get vector of column names
+  map(~ ggplot(trn_data_classed, aes(x = .data[[.x]])) + 
+        geom_histogram(fill = "steelblue", color = "white", bins = 30) +
+        labs(title = .x, x = NULL, y = "Count") +
+        theme_minimal()) %>%          # Map creates a list of plots
+  plot_grid(plotlist = ., ncol = 4)   # Combine list into one grid
+```
+
+**Numeric univariate notes:** \*Based on the grid of histograms provided
+in the image, here are the key observations regarding the numeric
+univariate distributions:
+
+Numeric univariate notes:
+
+Right-Skewed Distributions (outliers present): Many continuous variables
+representing size or value are heavily right-skewed. This is most
+prominent in sale_price, lot_area, gr_liv_area, and total_bsmt_sf. This
+skewness indicates that while the majority of homes have moderate prices
+and square footage, there is a "long tail" of high-value, large
+properties. lot_area in particular is so compressed by extreme outliers
+that the main distribution appears as a single bar.
+
+Zero-Inflated / Sparse Variables: A significant number of variables have
+a massive peak at zero, indicating that the feature is missing from the
+vast majority of homes.
+
+pool_area, misc_val, low_qual_fin_sf, and 3ssn_porch are almost entirely
+zero, making them sparse predictors.
+
+x2nd_flr_sf has a large spike at zero (representing one-story homes)
+followed by a normal distribution for homes that do have a second floor.
+
+wood_deck_sf, open_porch_sf, and mas_vnr_area (masonry veneer) also show
+that "having none" is the most common state, though a significant
+portion of homes do possess these features.
+
+Discrete / Count Distributions: Variables that technically are numeric
+but represent counts show distinct, separated bars:
+
+full_bath and half_bath are clearly discrete integers (0, 1, 2).
+
+bedroom_abv_gr (Bedrooms) is centered around 3.
+
+fireplaces and garage_cars (mostly 1 or 2 cars) are also clearly
+discrete.
+
+kitchen_abv_gr has extremely low variance; almost every observation is
+"1", which suggests it may not be a very useful predictor for modeling.
+
+Temporal Trends:
+
+year_built is not normally distributed; it shows a gradual increase with
+distinct peaks (likely post-war 1950s and the 2000s boom) and dips
+(e.g., around 2010 due to the recession).
+
+year_remod_add (Year Remodeled) is interesting: it has a peak at 1950
+(likely the earliest recorded date or original builds that were never
+remodeled) and a massive peak in the 2000s, indicating many homes were
+either built new or renovated recently.
+
+Uniform-like Distribution:
+
+yr_sold (Year Sold) appears roughly uniform across 2006–2009, with a
+slight drop in 2010 (possibly because the dataset cut off partway
+through that year).\*
+
+### Categorical variables
+
+Now examine univariate distributions of your categorical variables.
+While you can use multiple strategies to examine these data
+(quantitative and visual), you must also use `map()` to iterate through
+all categorical variables and create a `plot_grid` in a single piped
+chain. Comment below on what stands out to you from these plots.
+Document the questions that arise from inspecting the data in this way.
+
+```{r}
+library(cowplot)
+
+# Create a grid of bar plots for all categorical variables
+trn_data_classed %>%
+  select(where(is.factor)) %>%        # Select only categorical columns (factors & ordered)
+  names() %>%                         # Get vector of column names
+  map(~ ggplot(trn_data_classed, aes(x = .data[[.x]])) + 
+        geom_bar(fill = "steelblue") +
+        labs(title = .x, x = NULL, y = "Count") +
+        theme_minimal() +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 7))) %>% 
+  plot_grid(plotlist = ., ncol = 4)   # Combine into one grid
+```
+
+**Univariate categorical variable notes:** *The graph is too massive
+then I cannot see..*
+
+## Bivariate Relationships
+
+### Numeric variables
+
+Examine the relationship between numeric predictors and the outcome
+variable `sale_price`. You can use `map()` again to complete these in a
+single pipe -- just make sure to specify `sale_price` as your `y` value.
+
+What relationships appear promising to you? Do you have any ideas about
+unexpected distributional shapes? Try looking at transformations,
+filtering the data, or other methods that come to mind.
+
+```{r}
+library(cowplot)
+
+# Create a grid of scatterplots: Numeric Predictors vs Sale Price
+trn_data_classed %>%
+  select(where(is.numeric), -sale_price) %>%  # Exclude the target variable itself
+  names() %>%
+  map(~ ggplot(trn_data_classed, aes(x = .data[[.x]], y = sale_price)) + 
+        geom_point(alpha = 0.3, size = 0.5, color = "darkblue") + # alpha handles overplotting
+        geom_smooth(method = "lm", se = FALSE, color = "red", size = 0.5) + # Add linear trend
+        labs(title = .x, x = NULL, y = "Sale Price") +
+        theme_minimal() +
+        theme(plot.title = element_text(size = 10))) %>% 
+  plot_grid(plotlist = ., ncol = 4)
+```
+
+**Bivariate relationship notes:** **1. Promising Relationships**
+
+Several variables show strong predictive power, characterized by clear
+positive trends with `sale_price`:
+
+-   **Size Variables (Strongest Predictors):** The most obvious linear
+    relationships are with square footage measures.
+
+    -   **`gr_liv_area` (Above Grade Living Area):** This shows the
+        tightest and most consistent positive slope. It is likely the
+        single best predictor of price.
+
+    -   **`total_bsmt_sf`** and **`x1st_flr_sf`**: Both show strong
+        positive correlations.
+
+    -   **`garage_area`**: Shows a clear positive trend, though it
+        plateaus slightly at very large sizes.
+
+-   **Age and Quality:**
+
+    -   **`year_built`** and **`year_remod_add`**: These show a distinct
+        upward curve. Post-2000 homes command a significant premium
+        compared to older ones.
+
+-   **Count Variables:**
+
+    -   **`full_bath`**, **`fireplaces`**, and **`garage_cars`** show
+        clear "step-wise" increases in price as the count goes up.
+
+### **2. Unexpected Distributional Shapes & Issues**
+
+-   **Heteroscedasticity (The "Fan" Shape):**
+
+    -   Observe the plots for **`gr_liv_area`**, **`total_bsmt_sf`**,
+        and **`x1st_flr_sf`**. As the size (x-axis) increases, the
+        spread of prices (y-axis) widens significantly, forming a cone
+        or "fan" shape.
+
+    -   **Implication:** This violates the assumption of constant
+        variance (homoscedasticity) required for linear regression.
+
+    -   **Proposed Fix:** Apply a **log transformation** to the target
+        variable (`log(sale_price)`). This typically compresses the
+        high-value outliers and stabilizes the variance.
+
+-   **Outliers (Partial Sales):**
+
+    -   In the **`gr_liv_area`** plot, notice the points on the far
+        right (greater than 4000 sq ft) that have surprisingly low
+        prices. The red trend line is being "pulled" down by them.
+
+    -   **Implication:** As noted in the Data Dictionary, these are
+        likely "Partial Sales" or trade transactions that do not reflect
+        true market value.
+
+    -   **Proposed Fix:** Filter out observations where
+        `gr_liv_area > 4000`.
+
+-   **Zero-Inflated / Sparse Variables:**
+
+    -   Variables like **`pool_area`**, **`misc_val`**,
+        **`screen_porch`**, **`x3ssn_porch`**, and **`low_qual_fin_sf`**
+        are almost entirely vertical lines at zero.
+
+    -   **Implication:** Fitting a linear regression line through a
+        cloud of zeros is ineffective. The slope is dominated by the few
+        non-zero points.
+
+    -   **Proposed Fix:** Instead of using the area or value directly,
+        convert these into **binary indicator variables** (e.g.,
+        `has_pool`, `has_misc_feature`).
+
+### **Summary of Next Steps**
+
+1.  **Filter:** Remove homes with `gr_liv_area > 4000`.
+
+2.  **Transform:** Log-transform `sale_price`.
+
+3.  **Engineer:** Create binary flags for sparse variables like pools
+    and porches.
+
+### Correlations
+
+Convert any ordinal predictors to numeric, `select()` down to numeric
+variables, and plot all variable correlations with `sale_price`. What
+correlations stand out to you?
+
+```{r}
+# 1. Convert Ordinals to Numeric and Select Numeric Variables
+numeric_cor_data <- trn_data_classed %>%
+  mutate(across(where(is.ordered), as.numeric)) %>%  # Convert ordered factors to numbers
+  select(where(is.numeric))                          # Keep only numeric columns
+
+# 2. Calculate Correlations with Sale Price
+correlations <- cor(numeric_cor_data, use = "pairwise.complete.obs") %>%
+  as.data.frame() %>%
+  select(sale_price) %>%                             # Focus only on Sale Price column
+  rownames_to_column(var = "variable") %>%
+  filter(variable != "sale_price") %>%               # Remove self-correlation
+  arrange(desc(sale_price))                          # Sort highest to lowest
+
+# 3. Plot Correlations (Bar Chart for Readability)
+ggplot(correlations, aes(x = reorder(variable, sale_price), y = sale_price)) +
+  geom_col(aes(fill = sale_price > 0), show.legend = FALSE) + # Color by positive/negative
+  coord_flip() +                                     # Flip for readable labels
+  labs(title = "Variable Correlations with Sale Price", 
+       x = NULL, y = "Correlation Coefficient") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 7))        # Adjust text size for many variables
+```
+
+**Correlation notes:** *overall_quak, gr_li_area and more.*
+
+### Categorical variables
+
+Now choose the best plot(s) to visualize the relationship between your
+categorical predictors and `sale_price()`. What relationships stand out
+to you?
+
+```{r}
+library(cowplot)
+
+# Create a grid of Boxplots: Categorical Predictors vs Sale Price
+# We split into two batches because there are ~46 categorical variables, 
+# which is too many for a single readable plot.
+
+# --- Batch 1: First 20 Variables ---
+trn_data_classed %>%
+  select(where(is.factor)) %>%
+  names() %>%
+  head(20) %>% # Select first 20
+  map(~ ggplot(trn_data_classed, aes(x = .data[[.x]], y = sale_price)) + 
+        geom_boxplot(fill = "steelblue", alpha = 0.7, outlier.size = 0.5) +
+        labs(title = .x, x = NULL, y = "Sale Price") +
+        theme_minimal() +
+        theme(
+          axis.text.x = element_text(angle = 45, hjust = 1, size = 7), # Rotate labels to fit
+          plot.title = element_text(size = 10, face = "bold")
+        )) %>% 
+  plot_grid(plotlist = ., ncol = 4)
+
+# --- Batch 2: Remaining Variables ---
+trn_data_classed %>%
+  select(where(is.factor)) %>%
+  names() %>%
+  tail(-20) %>% # Select the rest
+  map(~ ggplot(trn_data_classed, aes(x = .data[[.x]], y = sale_price)) + 
+        geom_boxplot(fill = "steelblue", alpha = 0.7, outlier.size = 0.5) +
+        labs(title = .x, x = NULL, y = "Sale Price") +
+        theme_minimal() +
+        theme(
+          axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+          plot.title = element_text(size = 10, face = "bold")
+        )) %>% 
+  plot_grid(plotlist = ., ncol = 4)
+```
+
+**Categorical bivariate notes:** Based on the boxplots provided in the
+image, here are the relationships that stand out most clearly:
+
+### **1. Quality is King (Strong Positive Trends)**
+
+The most striking relationships are found in the **ordinal quality
+variables**. There is a clear, "stair-step" increase in median sale
+price as the quality rating improves.
+
+-   **`kitchen_qual` & `exter_qual`:** These show massive jumps in
+    value. A kitchen or exterior rated "Ex" (Excellent) commands a
+    significant premium over "Gd" (Good) and "TA" (Typical/Average). The
+    gap between "Gd" and "Ex" is particularly large, suggesting luxury
+    finishes are highly valued.
+
+-   **`bsmt_qual`:** The height of the basement matters. `Ex`
+    (Excellent, 100"+ ceiling) basements are associated with much higher
+    property values than `TA` or `None`.
+
+### **2. Modern "Must-Haves" (Binary Differentiators)**
+
+Certain features act almost like a filter for value. If a home lacks
+them, its value ceiling is significantly lower.
+
+-   **`central_air`:** There is a stark contrast between homes with
+    (`Y`) and without (`N`) central air. Homes with central air have a
+    much higher median price and a tighter distribution, indicating it
+    is a standard expectation for modern/valuable homes.
+
+-   **`paved_drive`:** Similarly, having a paved driveway (`Y`) is
+    associated with significantly higher values than a dirt or gravel
+    one (`N` or `P`).
+
+-   **`garage_type`:** Homes with **Attached (`Attchd`)** or **Built-in
+    (`BuiltIn`)** garages trade at higher prices than those with
+    **Detached (`Detchd`)** garages or no garage (`None`).
+
+### **3. Proxies for Age (Foundation & Electrical)**
+
+Some categorical variables likely act as proxies for the age of the
+home:
+
+-   **`foundation`:** Homes with **Poured Concrete (`PConc`)**
+    foundations have a distinctly higher median price than those with
+    **Cinder Block (`CBlock`)** or **Brick & Tile (`BrkTil`)**. Poured
+    concrete is standard in newer construction, whereas CBlock and
+    BrkTil are typical of older stock.
+
+-   **`electrical`:** The standard modern system (`SBrkr`) is associated
+    with higher values, while fuse boxes (`FuseA`, `FuseF`, `FuseP`) are
+    relegated to the lower price ranges.
+
+### **4. New Construction Premiums**
+
+-   **`sale_type` & `sale_condition`:** The boxplots for `New` (Sale
+    Type) and `Partial` (Sale Condition—often associated with new
+    builds) show very high median prices and wide distinct ranges
+    compared to `Normal` sales.
+
+### **5. What Doesn't Matter? (Weak Relationships)**
+
+-   **`mo_sold` (Month Sold):** This is an important negative finding.
+    The boxplots for months 1 through 12 are nearly identical in height
+    and spread. This suggests that **seasonality** (the time of year a
+    house is sold) has little to no impact on the final sale price in
+    this particular market.
+
+### Guided categorical exploration
+
+`ms_sub_class` is a mysterious variable -- take a closer look at it's
+relationship with `sale_price`. Be sure that you are examining both the
+variable distribution as well as the relationship with `sale_price`. You
+may also find it helpful to consult the data dictionary to see what
+types of homes the numeric codes represent.
+
+Do some types of homes generally sell for more than others? Is there
+anything surprising to you? (You may find it useful to order your
+`ms_sub_class` factor based on the values of `sale_price`)
+
+```{r}
+# 1. Distribution of MS SubClass (Count)
+p1 <- ggplot(trn_data_classed, aes(x = ms_sub_class)) +
+  geom_bar(fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Distribution of Dwelling Types", 
+       subtitle = "Count of homes per SubClass",
+       x = "MS SubClass Code", y = "Count") +
+  theme_minimal()
+
+# 2. Relationship with Sale Price (Boxplot)
+# We reorder the SubClass factor by Median Sale Price to make the trend clearer
+p2 <- ggplot(trn_data_classed, aes(x = fct_reorder(ms_sub_class, sale_price, .fun = median), 
+                                   y = sale_price)) +
+  geom_boxplot(fill = "steelblue", alpha = 0.7) +
+  coord_flip() +
+  labs(title = "Dwelling Type vs. Sale Price", 
+       subtitle = "Ordered by Median Price",
+       x = "MS SubClass Code", y = "Sale Price") +
+  theme_minimal()
+
+# Combine plots
+plot_grid(p1, p2, ncol = 2)
+```
+
+**Guided categorical exploration notes:** **Yes, absolutely.** There is
+a clear price hierarchy driven by the age and style of the home.
+
+-   **The Premium Tier (Newer & 2-Story):** The code **`060` (2-Story,
+    1946 & Newer)** stands out as the market leader. It has the highest
+    median price and the largest distribution of high-value outliers.
+    This indicates that modern, two-story family homes are the most
+    desirable property type in Ames.
+
+    -   **`120` (1-Story PUD)** also commands a high median price,
+        suggesting that modern Planned Unit Developments (likely
+        condos/townhomes with amenities) trade at a premium over
+        standard older stock.
+
+-   **The "Discount" Tier (Older & Conversions):** The lowest median
+    prices are consistently found in the "Old" or "Unconventional"
+    categories:
+
+    -   **`030` (1-Story, 1945 & Older)** trades significantly lower
+        than its newer counterpart `020`.
+
+        **`190` (2-Family Conversion)** and **`045` (1.5 Story
+        Unfinished)** are at the bottom. This makes sense as conversions
+        are often older rental properties, and "unfinished" implies less
+        usable square footage.
+
+### Categorical/categorical relationships
+
+Use this space to examine how the relationship between `ms_sub_class`
+and `sale_price` might be related to another categorical variable in our
+data. You may choose any categorical variable that you think might help
+you better understand `ms_sub_class`. Are you noticing any patterns
+across levels?
+
+```{r}
+# Visualize MS SubClass vs Sale Price, colored by Building Type
+ggplot(trn_data_classed, aes(x = fct_reorder(ms_sub_class, sale_price, .fun = median), 
+                             y = sale_price, 
+                             fill = bldg_type)) +
+  geom_boxplot(outlier.size = 0.5, alpha = 0.7) +
+  coord_flip() +
+  scale_fill_brewer(palette = "Set2") + # Use a distinct color palette
+  labs(title = "Decoding MS SubClass: Price & Building Type", 
+       subtitle = "SubClass codes effectively segregate Single Family vs. Townhouse/Duplex markets",
+       x = "MS SubClass (Ordered by Price)", 
+       y = "Sale Price", 
+       fill = "Building Type") +
+  theme_minimal()
+```
+
+**Cat/Cat Notes:** `ms_sub_class` is not just a random number; it
+effectively segregates the housing market into **Single-Family**,
+**Townhouse**, and **Multi-Family** sectors, with further price
+differentiation driven by unit location (End vs. Inside) and
+architectural style.
+
+## Save, render, pause
+
+### Save
+
+Save this `.qmd` file with your last name at the end (e.g.
+`hw_unit_2_modeling_jannsen.Rmd`).
+
+### Render
+
+Render the file to html and upload your html file to Canvas.
+
+### Pause
+
+Pause for a moment. Feel good about what you've done. You have completed
+your first IAML assignment. This is important and we are proud of you!!!

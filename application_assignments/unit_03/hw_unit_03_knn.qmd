@@ -80,23 +80,22 @@ Lets get started!
 
 ### Handle conflicts
 
-```{r}
-#| message: false
-
-```
-
 ### Load required packages and source
 
 Add packages (only what you need!)
 
 ```{r}
+library(tidymodels)
+library(tidyverse)
+options(conflicts.policy = "depends.ok")
 ```
 
-Source any function scripts (John's are already sourced for you, but you
-can change these or add your own function scripts too!)
+Source any function scripts (John's are already sourced for you, buta
+you can change these or add your own function scripts too!)
 
-```{r source}
+```{r}
 #| message: false
+
 
 devtools::source_url("https://github.com/jjcurtin/lab_support/blob/main/fun_plots.R?raw=true")
 devtools::source_url("https://github.com/jjcurtin/lab_support/blob/main/fun_eda.R?raw=true")
@@ -114,7 +113,7 @@ options(tibble.width = Inf, dplyr.print_max=Inf)
 ### Paths
 
 ```{r}
-path_data <- "homework/unit_03"
+setwd("C:/Users/gujia/Desktop/github/book_iaml/application_assignments/unit_03")
 ```
 
 ### Load data
@@ -126,16 +125,18 @@ Use `here::here()` and relative path for your data. Make sure your iaml
 project is open
 
 ```{r}
-data_trn <- 
-data_val <- 
-data_test <- 
+data_trn <- read_csv("ames_train_cln.csv")
+data_val <- read_csv("ames_val_cln.csv")
+data_test <- read_csv("ames_test_cln.csv")
 ```
 
 set appropriate variable classes (remember character classes should be
 factors!)
 
 ```{r}
-
+data_trn |>
+  mutate(across(where(is.character),factor))|>
+  glimpse()
 ```
 
 ### Create tracking tibble
@@ -144,7 +145,7 @@ Create a tibble to track the validation errors across various model
 configurations.
 
 ```{r}
-
+error_val <- tibble(model = character(), rmse_val = numeric())
 ```
 
 ## KNN Model building instructions
@@ -189,6 +190,8 @@ Informed by EDA from your modeling EDA script, create a recipe for your
 first model.
 
 ```{r}
+rec <- recipe(sale_price ~ gr_liv_area + lot_area + total_bsmt_sf, data = data_trn)|>
+  step_scale(all_numeric_predictors())
 ```
 
 ### Training feature matrix
@@ -196,15 +199,17 @@ first model.
 Use the `prep()` function to prep your recipe
 
 ```{r}
+rec_prep <- rec|>
+  prep(training = data_trn)
 ```
 
 Use the `bake()` function to generate the feature matrix of the training
 data.
 
 ```{r}
+feat_trn_1 <- rec_prep |>
+  bake(NULL)
 ```
-
-\`
 
 ### Fit your model
 
@@ -212,6 +217,11 @@ Fit a `knn` model predicting raw `sale_price` from your training feature
 matrix.
 
 ```{r}
+fit_5nn_3nn <-
+  nearest_neighbor()|>
+  set_engine("kknn")|>
+  set_mode("regression")|>
+  fit(sale_price ~ gr_liv_area + lot_area + total_bsmt_sf, data = feat_trn_1)
 ```
 
 ### Validation feature matrix
@@ -220,6 +230,8 @@ Use `bake()` to generate the feature matrix of the validation data that
 we will use to assess your model.
 
 ```{r}
+feat_val_1 <- rec_prep |>
+  bake(data_val)
 ```
 
 ### Assess your model
@@ -228,6 +240,12 @@ Use `rmse_vec()` to calculate the validation error (RMSE) of your model.
 Add this value to your validation error tracking tibble.
 
 ```{r}
+error_val <- bind_rows(error_val, 
+                        tibble(model = "3 numeric predictor 3nn", 
+                               rmse_val = rmse_vec(feat_val_1$sale_price, 
+                                                   predict(fit_5nn_3nn, feat_val_1)$.pred)))
+
+error_val
 ```
 
 ### Visualize performance
@@ -236,6 +254,18 @@ Visualize the relationship between raw and predicted sale price in your
 validation set using the `plot_truth()` function.
 
 ```{r}
+plot_truth <- function(truth, estimate) {
+  ggplot(mapping = aes(x = truth, y = estimate)) + 
+    geom_abline(lty = 2, color = "red") + 
+    geom_point(alpha = 0.5) + 
+    labs(y = "predicted outcome", x = "outcome") +
+    coord_obs_pred()   # scale axes uniformly (from tune package)
+}
+```
+
+```{r}
+plot_truth(truth = feat_val_1$sale_price, 
+           estimate = predict(fit_5nn_3nn, feat_val_1)$.pred)
 ```
 
 ## KNN 2
@@ -250,6 +280,11 @@ Informed by EDA from your modeling EDA script, create a recipe for your
 next model.
 
 ```{r}
+rec_2 <- recipe(sale_price ~ ms_zoning, data = data_trn)|>
+  
+  step_mutate(ms_zoning = fct_collapse(ms_zoning, "residential" = c("rh","rm","rl"), "commercial" = c("a", "c", "i"), "floating" = "fv"))|> step_dummy(ms_zoning)|> 
+  step_scale(all_numeric_predictors())|>
+  step_center(all_numeric_predictors())
 ```
 
 ### Training feature matrix
@@ -257,12 +292,14 @@ next model.
 Use the `prep()` function to prep your recipe
 
 ```{r}
+rec_prep_2 <- rec_2 |> prep(data_trn)
 ```
 
 Use the `bake()` function to generate the feature matrix of the training
 data.
 
 ```{r}
+feat_trn_2 <- rec_prep_2 |> bake(NULL)
 ```
 
 ### Fit your model
@@ -271,6 +308,11 @@ Fit a `knn` model predicting raw `sale_price` from your training feature
 matrix.
 
 ```{r}
+fit_20nn_1cat <-
+  nearest_neighbor(neighbors = 20)|>
+  set_engine("kknn")|>
+  set_mode("regression")|>
+  fit(sale_price ~ ., data = feat_trn_2)
 ```
 
 ### Validation feature matrix
@@ -279,6 +321,7 @@ Use `bake()` to generate the feature matrix of the validation data that
 we will use to assess your model.
 
 ```{r}
+feat_val_2 <- rec_prep_2 |> bake(data_val)
 ```
 
 ### Assess your model
@@ -287,6 +330,8 @@ Use the `rmse_vec()` function to calculate the validation error (RMSE)
 of your model. Add this value to your validation error tracking tibble.
 
 ```{r}
+error_val <- bind_rows(error_val, tibble(model = "1 categorical predictor 20nn", rmse_val = rmse_vec(feat_val_2$sale_price, predict(fit_20nn_1cat, feat_val_2)$.pred))) 
+error_val
 ```
 
 ### Visualize performance
@@ -295,6 +340,7 @@ Visualize the relationship between raw and predicted `sale_price` in
 your validation set using `plot_truth()`.
 
 ```{r}
+plot_truth(truth = feat_val_2$sale_price, estimate = predict(fit_20nn_1cat, feat_val_2)$.pred)
 ```
 
 ## KNN 3
@@ -309,6 +355,7 @@ Informed by EDA from your modeling EDA script, create a recipe for your
 next model.
 
 ```{r}
+rec_3 <- recipe(sale_price ~ overall_qual, data = data_trn)|> step_mutate(overall_qual = as.numeric(overall_qual))|> step_scale(all_numeric_predictors())
 ```
 
 ### Training feature matrix
@@ -316,12 +363,14 @@ next model.
 Use the `prep()` function to prep your recipe
 
 ```{r}
+rec_prep_3 <- rec_3|> prep(data_trn)
 ```
 
 Use the `bake()` function to generate the feature matrix of the training
 data.
 
 ```{r}
+feat_trn_3 <- rec_prep_3|> bake(NULL)
 ```
 
 ### Fit your model
@@ -330,6 +379,7 @@ Fit a `knn` model predicting raw `sale_price` from your training feature
 matrix.
 
 ```{r}
+fit_5nn_1ord <- nearest_neighbor() |> set_engine("kknn")|> set_mode("regression")|> fit(sale_price ~ ., data = feat_trn_3)
 ```
 
 ### Validation feature matrix
@@ -338,6 +388,7 @@ Use `bake()` to generate the feature matrix of the validation data that
 we will use to assess your model.
 
 ```{r}
+feat_val_3 <- rec_prep_3 |> bake(data_val)
 ```
 
 ### Assess your model
@@ -346,6 +397,8 @@ Use `rmse_vec()` to calculate the validation error (RMSE) of your model.
 Add this value to your validation error tracking tibble.
 
 ```{r}
+error_val <- bind_rows(error_val, tibble(model = "1 ordinal predictor 5nn", rmse_val = rmse_vec(feat_val_3$sale_price, predict(fit_5nn_1ord, feat_val_3)$.pred))) 
+error_val
 ```
 
 ### Visualize performance
@@ -354,6 +407,7 @@ Visualize the relationship between raw and predicted `sale_price` in
 your validation set using `plot_truth()`.
 
 ```{r}
+plot_truth(truth = feat_val_3$sale_price, estimate = predict(fit_5nn_1ord, feat_val_3)$.pred)
 ```
 
 ## 4 Additional configurations
