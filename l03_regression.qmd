@@ -623,7 +623,7 @@ rec_prep <- rec |>
 
 ```{r}
 feat_trn <- rec_prep |> 
-  bake(data_trn) # <1>
+  bake(NULL) # <1>
 ```
 1. I am going to stop using `new_data = ` but remember, we use NULL if we want the previously saved training features.  If instead, we want features for new data, we provide that dataset.
 
@@ -2418,12 +2418,12 @@ rec <-
            overall_qual + ms_zoning, data = data_trn) |> 
   step_impute_median(garage_cars) |> 
   step_mutate(overall_qual = as.numeric(overall_qual)) |> 
+  step_scale(all_numeric_predictors()) |>  # done before dummy coding avoid scaling binary features 
   step_mutate(ms_zoning = fct_collapse(ms_zoning,
                                  "residential" = c("res_high", "res_med", "res_low"),
                                  "commercial" = c("agri", "commer", "indus"),
                                  "floating" = "float")) |>
-  step_dummy(ms_zoning) |> 
-  step_scale(all_numeric_predictors())
+  step_dummy(ms_zoning) 
 ```
 
 --------------------------------------------------------------------------------
@@ -2481,4 +2481,4 @@ rsq_vec(feat_val$sale_price,
         predict(fit_20nn_5num_mszone, feat_val)$.pred)
 ```
 
-Overall, we now have a model that predicts housing prices with about 30K of RMSE and accounting for 84% of the variance.  I am sure you can improve on this!
+Overall, we now have a model that predicts housing prices with about 30K of RMSE and accounting for 86% of the variance.  I am sure you can improve on this!
