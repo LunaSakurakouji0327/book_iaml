@@ -77,6 +77,9 @@ on the held-out set to determine the best fitting model in the class.
 Add packages (only what you need!)
 
 ```{r}
+library(tidyverse) # for general data wrangling
+library(tidymodels) # for modeling
+options(conflicts.policy = "depends.ok")
 
 ```
 
@@ -105,7 +108,7 @@ In the chunk below, set path_data to the location of your cleaned data
 files.
 
 ```{r}
-path_data <- "homework/unit_04"
+path_data <- "application_assignments/unit_04"
 ```
 
 ### Load data
@@ -119,9 +122,9 @@ Use `here::here()` and relative path for your data. Make sure your iaml
 project is open!
 
 ```{r}
-data_trn <- 
-data_val <- 
-data_test <- 
+data_trn <- read_csv(here::here(path_data, "titanic_train_cln.csv"))
+data_val <- read_csv(here::here(path_data, "titanic_val_cln.csv"))
+data_test <- read_csv(here::here(path_data, "titanic_test_cln.csv"))
 ```
 
 ### Class variables
@@ -130,7 +133,8 @@ Set appropriate variable classes (remember character classes should be
 factors).
 
 ```{r}
-
+data_trn <- data_trn |>
+  mutate(across(where(is.character), factor))
 ```
 
 ### Create tracking tibble
@@ -139,7 +143,7 @@ Create an empty tracking tibble to track the validation error across the
 model configurations you will fit.
 
 ```{r}
-
+error_val <- tibble(model = character(), accuracy = numeric())
 ```
 
 ## KNN Model Building Instructions
@@ -182,42 +186,22 @@ one sentence stating how your modeling EDA informed what you chose)*
 Informed by EDA from your modeling EDA script, create a recipe for your
 first model.
 
-```{r}
-
-```
-
 ### Training feature matrix
 
 Use the `prep()` function to prep your recipe.
 
-```{r}
-
-```
-
 Use the `bake()` function to generate the feature matrix of the training
 data.
-
-```{r}
-
-```
 
 ### Fit your model
 
 Fit a `knn` model predicting `survived` from your training feature
 matrix.
 
-```{r}
-
-```
-
 ### Validation feature matrix
 
 Use `bake()` to generate the feature matrix of the validation data that
 we will use to assess your model.
-
-```{r}
-
-```
 
 ### Assess your model
 
@@ -225,7 +209,35 @@ Use `accuracy_vec()` to calculate the validation error (accuracy) of
 your model. Add this value to your validation error tracking tibble.
 
 ```{r}
+rec <- recipe(survived ~ pclass + sex + age + n_sib_spouse + n_parent_child  + fare  + embarked, data = data_trn)|>
+  step_impute_median(all_numeric_predictors()) |>
+  step_impute_mode(all_nominal_predictors())|>
+  
+  step_scale(all_numeric_predictors())
+ 
+  
+  
 
+
+rec_prep <- rec |> 
+  prep(data_trn)
+feat_trn <- rec_prep |>
+  bake(NULL)
+feat_val <- rec_prep |> 
+  bake(data_val)
+
+fit <- 
+  nearest_neighbor(neighbors = 1)|>
+  set_engine("kknn")|>
+  set_mode("classification")|>
+  fit(survived ~ ., data = feat_trn)
+
+error_val <- bind_rows(error_val,
+                       tibble(model = "kknn_k1",
+                              accuracy = accuracy_vec(feat_val$survived,
+             predict(fit, feat_val, type = "class")$.pred_class)))
+
+error_val
 ```
 
 ## KNN model configuration 2
@@ -241,42 +253,22 @@ one sentence stating how your modeling EDA informed what you chose)*
 Informed by EDA from your modeling EDA, create a recipe for your second
 model.
 
-```{r}
-
-```
-
 ### Training feature matrix
 
 Use the `prep()` function to prep your recipe.
 
-```{r}
-
-```
-
 Use the `bake()` function to generate the feature matrix of the training
 data.
-
-```{r}
-
-```
 
 ### Fit your model
 
 Fit a `knn` model predicting `survived` from your training feature
 matrix.
 
-```{r}
-
-```
-
 ### Validation feature matrix
 
 Use `bake()` to generate the feature matrix of the validation data that
 we will use to assess your model.
-
-```{r}
-
-```
 
 ### Assess your model
 
@@ -284,7 +276,39 @@ Use `accuracy_vec()` to calculate the validation error (accuracy) of
 your model. Add this value to your validation error tracking tibble.
 
 ```{r}
+#in this recipe I merge n_sib_spouse and n_parent_child to be family
+rec <- recipe(
+  survived ~ pclass + sex + age + fare + n_sib_spouse + n_parent_child,
+  data = data_trn
+) |>
+  step_impute_median(all_numeric_predictors()) |>
+  step_impute_mode(all_nominal_predictors())|>
+  step_mutate(
+    family_size = n_sib_spouse + n_parent_child + 1
+  ) |>
+  step_rm(n_sib_spouse,n_parent_child)|>
+  step_normalize(all_numeric_predictors()) 
+  
 
+rec_prep <- rec |> 
+  prep(data_trn)
+feat_trn <- rec_prep |>
+  bake(NULL)
+feat_val <- rec_prep |> 
+  bake(data_val)
+
+fit <- 
+  nearest_neighbor(neighbors = 5)|>
+  set_engine("kknn")|>
+  set_mode("classification")|>
+  fit(survived ~ ., data = feat_trn)
+
+error_val <- bind_rows(error_val,
+                       tibble(model = "kknn_k5",
+                              accuracy = accuracy_vec(feat_val$survived,
+             predict(fit, feat_val, type = "class")$.pred_class)))
+
+error_val
 ```
 
 ## KNN model configuration 3
@@ -298,43 +322,24 @@ one sentence stating how your modeling EDA informed what you chose)*
 ### Set up recipe
 
 Informed by EDA from your modeling EDA script, create a recipe for your
-third model.
-
-```{r}
-
-```
+third model
 
 ### Training feature matrix
 
 Use the `prep()` function to prep your recipe.
 
-```{r}
-
-```
-
 Use the `bake()` function to generate the feature matrix of the training
 data.
-
-```{r}
-```
 
 ### Fit your model
 
 Fit a `knn` model predicting `survived` from your training feature
 matrix.
 
-```{r}
-
-```
-
 ### Validation feature matrix
 
 Use `bake()` to generate the feature matrix of the validation data that
 we will use to assess your model.
-
-```{r}
-
-```
 
 ### Assess your model
 
@@ -342,7 +347,43 @@ Use `accuracy_vec()` to calculate the validation error (accuracy) of
 your model. Add this value to your validation error tracking tibble.
 
 ```{r}
+rec <- recipe(
+  survived ~ pclass + sex + age + fare + n_sib_spouse + n_parent_child + embarked,
+  data = data_trn
+) |>
+  step_impute_median(all_numeric_predictors()) |>
+  step_impute_mode(all_nominal_predictors())|>
+  step_mutate(
+    family_size = n_sib_spouse + n_parent_child + 1
+  ) |>
+  step_mutate(
+    embarked_region = case_when(
+      embarked %in% c("c", "s") ~ "Europe",
+      embarked == "q" ~ "Other"
+    ))|>
+  step_rm(n_sib_spouse,n_parent_child)|>
+  step_scale(all_numeric_predictors()) 
+  
 
+rec_prep <- rec |> 
+  prep(data_trn)
+feat_trn <- rec_prep |>
+  bake(NULL)
+feat_val <- rec_prep |> 
+  bake(data_val)
+
+fit <- 
+  nearest_neighbor(neighbors = 10)|>
+  set_engine("kknn")|>
+  set_mode("classification")|>
+  fit(survived ~ ., data = feat_trn)
+
+error_val <- bind_rows(error_val,
+                       tibble(model = "kknn_k10",
+                              accuracy = accuracy_vec(feat_val$survived,
+             predict(fit, feat_val, type = "class")$.pred_class)))
+
+error_val
 ```
 
 ## Additional model configurations (Optional)

@@ -1,6 +1,6 @@
 ---
 title: 'Unit 4 (Classification): Fit RDA Models'
-author: "Your Name"
+author: "JIANGRAN GU"
 date: "`r lubridate::today()`"
 format: 
   html: 
@@ -80,6 +80,7 @@ Add packages (only what you need!)
 library(tidyverse) # for general data wrangling
 library(tidymodels) # for modeling
 options(conflicts.policy = "depends.ok")
+library(discrim, exclude = "smoothness")
 ```
 
 Source any function scripts (John's are already sourced for you, but you
@@ -131,9 +132,6 @@ factors)
 ```{r}
 data_trn <- data_trn |>
   mutate(across(where(is.character), factor))
-data_val <- data_val |>
-  mutate(across(where(is.character), factor))
-data_test<- data_test |>mutate(across(where(is.character), factor))
 ```
 
 ### Create tracking tibble
@@ -142,7 +140,7 @@ Create an empty tracking tibble to track the validation error across the
 various model configurations you will fit.
 
 ```{r}
-error_val <- tibble(model = character(), rmse = numeric())
+error_val <- tibble(model = character(), accuracy = numeric())
 ```
 
 ## RDA model building instructions
@@ -183,9 +181,8 @@ Informed by EDA from your modeling EDA, create a recipe for your first
 model.
 
 ```{r}
-rec_1 <- recipe(survived ~ pclass + sex + age + n_sib_spouse + n_parent_child + ticket + fare + cabin + embarked, data = data_trn)|>
+rec_1 <- recipe(survived ~ pclass + sex + age + n_sib_spouse + n_parent_child  + fare +  embarked, data = data_trn)|>
   step_impute_median(age)|>
-
   step_YeoJohnson(n_parent_child, n_sib_spouse, age)
 
 ```
@@ -203,12 +200,6 @@ feat_trn_1 <- rec_1_prep|>
 
 feat_val_1 <- rec_1_prep |>
   bake(data_val)
-```
-
-Use the `bake()` function to generate the feature matrix of the training
-data.
-
-```{r}
 
 ```
 
@@ -220,15 +211,10 @@ matrix.
 ```{r}
 # use these hyperparamater values:
 # discrim_regularized(frac_common_cov = 0, frac_identity = 0)
-```
-
-### Validation feature matrix
-
-Use `bake()` to generate the feature matrix of the validation data that
-we will use to assess your model.
-
-```{r}
-
+fit_rda_1 <- 
+  discrim_regularized(frac_common_cov = 0, frac_identity = 0)|>
+  set_engine("klaR")|>
+  fit(survived ~., data = feat_trn_1)
 ```
 
 ### Assess your model
@@ -237,7 +223,13 @@ Use `accuracy_vec()` to calculate the validation error (accuracy) of
 your model. Add this value to your validation error tracking tibble.
 
 ```{r}
-
+accuracy_vec(feat_val_1$survived,
+             predict(fit_rda_1, feat_val_1, type = "class")$.pred_class)
+error_val <- bind_rows(error_val,
+                       tibble(model = "rda_1",
+                              accuracy = accuracy_vec(feat_val_1$survived,
+             predict(fit_rda_1, feat_val_1, type = "class")$.pred_class)))
+error_val
 ```
 
 ## RDA model configuration 2
@@ -254,7 +246,9 @@ Informed by EDA from your modeling EDA, create a recipe for your second
 model.
 
 ```{r}
-
+rec_2 <- recipe(survived ~ pclass + sex + age + n_sib_spouse + n_parent_child  + fare +  embarked, data = data_trn)|>
+  step_impute_median(age)|>
+  step_YeoJohnson(n_parent_child, n_sib_spouse, age)
 ```
 
 ### Training feature matrix
@@ -262,7 +256,14 @@ model.
 Use the `prep()` function to prep your recipe.
 
 ```{r}
+rec_2_prep <- rec_2|>
+  prep(data_trn)
 
+feat_trn_2 <- rec_2_prep|>
+  bake(NULL)
+
+feat_val_2 <- rec_2_prep |>
+  bake(data_val)
 ```
 
 Use the `bake()` function to generate the feature matrix of the training
@@ -280,6 +281,10 @@ matrix
 ```{r}
 # use these hyperparamater values:
 # discrim_regularized(frac_common_cov = 0, frac_identity = 0)
+fit_rda_2 <- 
+  discrim_regularized(frac_common_cov = 0, frac_identity = 0)|>
+  set_engine("klaR")|>
+  fit(survived ~., data = feat_trn_2)
 ```
 
 ### Validation feature matrix
@@ -288,7 +293,14 @@ Use `bake()` to generate the feature matrix of the validation data that
 we will use to assess your model.
 
 ```{r}
+rec_2_prep <- rec_2|>
+  prep(data_trn)
 
+feat_trn_2 <- rec_2_prep|>
+  bake(NULL)
+
+feat_val_2 <- rec_2_prep |>
+  bake(data_val)
 ```
 
 ### Assess your model
@@ -298,6 +310,11 @@ your model. Add this value to your validation error tracking tibble.
 
 ```{r}
 
+error_val <- bind_rows(error_val,
+                       tibble(model = "rda_2",
+                              accuracy = accuracy_vec(feat_val_2$survived,
+             predict(fit_rda_2, feat_val_2, type = "class")$.pred_class)))
+error_val
 ```
 
 ## RDA model configuration 3
@@ -314,7 +331,11 @@ Informed by EDA from your modeling EDA, create a recipe for your third
 model.
 
 ```{r}
-
+#I used plot_hist on fare and found that there is a high postive skewness
+rec_3 <- recipe(survived ~ pclass + sex + age + n_sib_spouse + n_parent_child  + fare +  embarked, data = data_trn)|>
+  step_impute_median(age)|>
+  step_YeoJohnson(n_parent_child, fare, n_sib_spouse, age)|>
+  step_normalize(all_numeric_predictors())
 ```
 
 ### Training feature matrix
@@ -322,6 +343,14 @@ model.
 Use the `prep()` function to prep your recipe.
 
 ```{r}
+rec_3_prep <- rec_3|>
+  prep(data_trn)
+
+feat_trn_3 <- rec_3_prep|>
+  bake(NULL)
+
+feat_val_3 <- rec_3_prep |>
+  bake(data_val)
 
 ```
 
@@ -340,6 +369,10 @@ matrix.
 ```{r}
 # use these hyperparamater values:
 # discrim_regularized(frac_common_cov = 0, frac_identity = 0)
+fit_rda_3 <- 
+  discrim_regularized(frac_common_cov = 0, frac_identity = 0)|>
+  set_engine("klaR")|>
+  fit(survived ~., data = feat_trn_3)
 ```
 
 ### Validation feature matrix
@@ -357,7 +390,11 @@ Use `accuracy_vec()` to calculate the validation error (accuracy) of
 your model. Add this value to your validation error tracking tibble.
 
 ```{r}
-
+error_val <- bind_rows(error_val,
+                       tibble(model = "rda_3",
+                              accuracy = accuracy_vec(feat_val_3$survived,
+             predict(fit_rda_3, feat_val_3, type = "class")$.pred_class)))
+error_val
 ```
 
 ## Additional model configurations (Optional)
@@ -367,7 +404,78 @@ RDA model configurations. Record your models' performance in the
 validation data (accuracy) in your validation error tracking tibble.
 
 ```{r}
+rec <- recipe(survived ~ pclass + sex + age + n_sib_spouse + n_parent_child  + fare  + embarked, data = data_trn)|>
+  step_impute_median(age)|>
+  step_YeoJohnson(age,n_sib_spouse,pclass)|>
 
+  step_interact(
+    ~
+      n_parent_child:fare +
+      n_parent_child:pclass +
+      fare:sex:age:n_parent_child +
+      fare:sex:age 
+  )
+  
+
+
+rec_prep <- rec |> 
+  prep(data_trn)
+feat_trn <- rec_prep |>
+  bake(NULL)
+feat_val <- rec_prep |> 
+  bake(data_val)
+
+fit <- 
+  discrim_regularized(frac_common_cov = 0, frac_identity = 0)|>
+  set_engine("klaR")|>
+  fit(survived ~., data = feat_trn)
+
+error_val <- bind_rows(error_val,
+                       tibble(model = "rda",
+                              accuracy = accuracy_vec(feat_val$survived,
+             predict(fit, feat_val, type = "class")$.pred_class)))
+
+error_val
+```
+
+```{r}
+
+rec <- recipe(survived ~ pclass + sex + age + n_sib_spouse + n_parent_child  + fare  + embarked, data = data_trn)|>
+  step_impute_median(age)|>
+  step_YeoJohnson(age,n_sib_spouse,pclass)|>
+
+
+  step_mutate(
+    family_size = n_sib_spouse + n_parent_child + 1
+  ) |>
+  step_interact(
+    ~
+      family_size:fare +
+      family_size:pclass +
+      fare:sex:age:family_size +
+      fare:sex:age 
+  )|>
+  step_rm(n_sib_spouse,n_parent_child)
+
+
+rec_prep <- rec |> 
+  prep(data_trn)
+feat_trn <- rec_prep |>
+  bake(NULL)
+feat_val <- rec_prep |> 
+  bake(data_val)
+
+fit <- 
+  discrim_regularized(frac_common_cov = 0, frac_identity = 0)|>
+  set_engine("klaR")|>
+  fit(survived ~., data = feat_trn)
+
+error_val <- bind_rows(error_val,
+                       tibble(model = "rda",
+                              accuracy = accuracy_vec(feat_val$survived,
+             predict(fit, feat_val, type = "class")$.pred_class)))
+
+error_val
 ```
 
 ## Predictions
@@ -397,9 +505,9 @@ If your best model is a `knn`, don't edit anything in the next two code
 chunks and skip to the final section to save, render, etc.
 
 ```{r}
-best_model <- NULL 
-best_rec <- NA # best recipe
-last_name <- ""
+best_model <- fit 
+best_rec <- rec # best recipe
+last_name <- "Gu"
 ```
 
 ### Generate test predictions
