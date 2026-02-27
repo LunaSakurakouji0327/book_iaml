@@ -9,130 +9,209 @@ format:
     toc_depth: 4
 editor_options: 
   chunk_output_type: console
----   
+---
 
 ## Introduction
 
 To begin, download the following from the course web book (Unit 6):
 
-* `hw_unit_06_regularization.qmd` (notebook for this assignment)
+-   `hw_unit_06_regularization.qmd` (notebook for this assignment)
 
-* `ames_full_cln.csv` (data for this assignment)
+-   `ames_full_cln.csv` (data for this assignment)
 
-* `ames_data_dictionary.pdf` (data dictionary for the ames dataset)
+-   `ames_data_dictionary.pdf` (data dictionary for the ames dataset)
 
-The data for this week's assignment are the Ames housing price data you've seen in class and worked with in previous homework assignments. However, this week you're working with all 81 variables. 
+The data for this week's assignment are the Ames housing price data you've seen in class and worked with in previous homework assignments. However, this week you're working with all 81 variables.
 
-The data are already cleaned (i.e., variable names tidied, levels of categorical variables tidied, "none" put in for missing values where indicated in the data dictionary). You don't need to submit any modeling EDA because we're describing for you the specific steps to implement in the recipe. Of course you **normally** would do modeling EDA before fitting any models, but we're trying to keep the assignment from getting too long!  Nonetheless, you probably want to skim the data to become more familiar with it!
+The data are already cleaned (i.e., variable names tidied, levels of categorical variables tidied, "none" put in for missing values where indicated in the data dictionary). You don't need to submit any modeling EDA because we're describing for you the specific steps to implement in the recipe. Of course you **normally** would do modeling EDA before fitting any models, but we're trying to keep the assignment from getting too long! Nonetheless, you probably want to skim the data to become more familiar with it!
 
 In this assignment, you will practice tuning regularization hyperparameters ($\alpha$ and $\lambda$) and selecting among model configurations using resampling methods. Like last week, **fitting models will take a little longer**. We've kept the active coding component of the assignment to a reasonable length, but please try to plan for the increased run time!
 
 **Some reminders!**
 
- - Setting up **parallel processing** will dramatically reduce your run times
- - You may consider the use of **caching** if you are comfortable with that process
- - **Restart** your R session prior to working on this assignment and **run code chunks sequentially** to minimize the chance of running into errors when you go to render your file
- - **Make sure to answer ALL short response questions!***
+-   Setting up **parallel processing** will dramatically reduce your run times
+-   You may consider the use of **caching** if you are comfortable with that process
+-   **Restart** your R session prior to working on this assignment and **run code chunks sequentially** to minimize the chance of running into errors when you go to render your file
+-   **Make sure to answer ALL short response questions!**\*
 
 Let's get started!
 
------
+------------------------------------------------------------------------
 
 ## Setup
 
 ### Load in your tidy packages
-```{r}
 
+```{r}
+#| message: false
+library(tidymodels)
+library(tidyverse)
+library(dplyr)
+library(Matrix, exclude = c("expand", "pack", "unpack"))
 ```
 
 ### Set up your conflicts policy
+
 ```{r}
 options(conflicts.policy = "depends.ok")
 conflictRules("Matrix", mask.ok = c("expand", "pack", "unpack")) # we need to add this in today, too!
 ```
 
 ### Load additional packages
+
 ```{r}
+library(future)
 
 ```
 
 ### Source function scripts (John's or your own)
-```{r}
 
+```{r}
+#| message: false
+
+source("https://github.com/jjcurtin/lab_support/blob/main/fun_ml.R?raw=true")
+source("https://github.com/jjcurtin/lab_support/blob/main/fun_plots.R?raw=true")
+source("https://github.com/jjcurtin/lab_support/blob/main/fun_eda.R?raw=true")
 ```
 
 ### Specify other global settings
 
 If you are going to use `cache_rds()`, you might include `rerun_setting <- FALSE` in this chunk!
-```{r}
 
+```{r}
+rerun_setting <- FALSE
 ```
 
 ### Paths
+
 ```{r}
-path_data <- 
+path_data <- getwd()
 ```
 
 ### Set up parallel processing
-```{r}
 
+```{r}
+plan(multisession, workers = parallel::detectCores(logical = FALSE))
 ```
 
 ### Read in data
 
 Read in the `ames_full_cln.csv` data file.
+
 ```{r}
-data_all <- 
+data_all <- read_csv(here::here(path_data,"ames_full_cln.csv" ))
 ```
 
 ### Set variable classes
 
 Set all variables to factor or numeric classes. Here is where you will also want to explicitly set factor levels for those with low frequency count levels (e.g., `neighborhood`, `ms_sub_class`) and do any ordering of factor levels.
-```{r}
 
+```{r}
+data_all <- data_all %>%
+  mutate(across(where(is.character), as.factor))
 ```
 
+```{r}
+data_all <- data_all %>%
+  mutate(
+    sale_price = as.numeric(sale_price),
+    lot_area   = as.numeric(lot_area),
+    gr_liv_area = as.numeric(gr_liv_area),
+    year_built = as.numeric(year_built)
+  )
+```
+
+```{r}
+data_all <- data_all %>%
+  mutate(
+fct_lump_n(neighborhood, n = 15))
+```
+
+```{r}
+data_all <- data_all %>%
+  mutate(
+    ms_sub_class = fct_lump_min(ms_sub_class, min = 20)
+  )
+```
+
+```{r}
+data_all <- data_all %>%
+  mutate(
+    overall_qual = factor(overall_qual,
+                          levels = sort(unique(overall_qual)),
+                          ordered = TRUE)
+  )
+```
+
+```{r}
+data_all <- data_all %>%
+  mutate(
+    overall_cond = factor(overall_cond,
+                          levels = sort(unique(overall_cond)),
+                          ordered = TRUE)
+  )
+```
+
+```{r}
+quality_levels <- c("Po", "Fa", "TA", "Gd", "Ex")
+
+data_all <- data_all %>%
+  mutate(
+    exter_qual  = factor(exter_qual, levels = quality_levels, ordered = TRUE),
+    kitchen_qual = factor(kitchen_qual, levels = quality_levels, ordered = TRUE),
+    heating_qc  = factor(heating_qc, levels = quality_levels, ordered = TRUE)
+  )
+```
 
 ## Set up splits
 
 ### Divide data into train and test
 
 Hold out 25% of the data as `data_test` for evaluation using the `initial_split()` function. Stratify on `sale_price`. **Don't forget to set a seed!**
+
 ```{r}
-splits_test <- 
+set.seed(20060328)
+splits_test <- data_all |>
+  initial_split(prop = 0.75, strata = "sale_price")
   
-data_trn <- 
+data_trn <- training(splits_test)
   
-data_test <-
+data_test <- testing(splits_test)
 ```
 
 ### Make splits for hyperparameter tuning
 
 For parts 2 and 3, you'll need splits within `data_trn` to select among among model configurations using held out data. Create 100 bootstrap splits stratified on `sale_price`. **You do not need to set a new seed.**
+
 ```{r}
-splits_boot <- 
+splits_boot <-  data_trn |>
+  bootstraps(times = 100, strata = "sale_price")
 ```
 
 ## Build recipe
 
 You will build one recipe that can be used across three model fits. Please follow these instructions to build your recipe:
 
-* Regress the outcome `sale_price` on all predictors 
+-   Regress the outcome `sale_price` on all predictors
 
-* Remove the ID variable (`pid`) with `step_rm()` 
+-   Remove the ID variable (`pid`) with `step_rm()`
 
-* Use `step_impute_median()` to impute the median for any missing values in numeric predictors
+-   Use `step_impute_median()` to impute the median for any missing values in numeric predictors
 
-* Use `step_impute_mode()` to impute the mode for any missing values in the factor predictors
+-   Use `step_impute_mode()` to impute the mode for any missing values in the factor predictors
 
-* Use `step_normalize()` to normalize all numeric predictors (**necessary for regularized models**)
+-   Use `step_normalize()` to normalize all numeric predictors (**necessary for regularized models**)
 
-* Apply dummy coding to all factor predictors
-
-
+-   Apply dummy coding to all factor predictors
 
 ```{r}
 rec <- 
+  recipe(sale_price ~ ., data = data_trn) |>
+  step_rm(pid) |>
+  step_impute_median(all_numeric_predictors()) |>
+  step_impute_mode(all_nominal_predictors()) |>
+  step_normalize(all_numeric_predictors()) |>
+  step_dummy(all_nominal_predictors())
 ```
 
 ## Create error tracking tibble
@@ -144,37 +223,63 @@ track_rmse <- tibble(model = character(),
                      n_features = numeric())
 ```
 
------
+------------------------------------------------------------------------
 
 ## Part 1: Fitting an OLS linear regression
 
 ### Fit a regression model in the full training set
 
 Make a feature matrix for training data and for test data.
-```{r}
 
+```{r}
+rec_prep <- 
+  rec |> 
+  prep(training = data_trn)
+
+feat_trn <- rec_prep |> 
+  bake(NULL)
+
+feat_test <- rec_prep |>
+  bake(new_data = data_test)
 ```
 
 Fit a linear regression model. **No resampling is needed because there are no hyperparameters to tune.**
+
 ```{r}
 fit_linear <- 
+   linear_reg() |> 
+  set_engine("lm") |>  
+  fit(sale_price ~ ., data = feat_trn)
 ```
 
-### Get RMSE in train & test 
+### Get RMSE in train & test
 
 Use `rmse_vec()` to get error in `feat_trn`.
 
 *Notice the warnings we get when making these predictions. R is telling us that our models are rank-deficient - this means that this model may not have determined a unique set of parameter estimates to minimize the cost function. This can occur for a variety of reasons, some of which are real problems and other times for reasons that are not a problem. For now continue on!*
+
 ```{r}
-lin_trn_rmse <- 
+lin_trn_rmse <-  rmse_vec(
+    feat_trn$sale_price,
+    predict(fit_linear, feat_trn)$.pred
+  )
+
+lin_trn_rmse
 ```
 
 Use `rmse_vec()` to get error in `feat_test`.
+
 ```{r}
-lin_test_rmse <- 
+lin_test_rmse <- rmse_vec(
+    feat_test$sale_price,
+    predict(fit_linear, feat_test)$.pred
+  )
+
+lin_test_rmse
 ```
 
 Get the number of features.
+
 ```{r}
 lin_n_feat <- fit_linear |> 
   tidy() |> 
@@ -183,6 +288,7 @@ lin_n_feat <- fit_linear |>
 ```
 
 Add to tracking tibble
+
 ```{r}
 track_rmse <- add_row(track_rmse,
                       model = "OLS",
@@ -195,15 +301,16 @@ track_rmse
 
 > How does performance compare in training and test? **Type your response between the asterisks below.**
 
-*Type your response here*
+*The OLS model has the lowest training RMSE (18,691), indicating that it fits the training data very well. However, the test RMSE increases substantially to 27,215. The large gap between training and test performance suggests that the model is overfitting the training data.*
 
------
+------------------------------------------------------------------------
 
 ## Part 2: Fitting a LASSO regression
 
 ### Set up a hyperparameter grid
 
-In the LASSO, the mixture hyperparameter ($\alpha$) will be set to 1, but we'll need to tune the penalty hyperparameter ($\lambda$). 
+In the LASSO, the mixture hyperparameter ($\alpha$) will be set to 1, but we'll need to tune the penalty hyperparameter ($\lambda$).
+
 ```{r}
 grid_penalty <- expand_grid(penalty = exp(seq(-6, 8, length.out = 100)))
 ```
@@ -211,70 +318,121 @@ grid_penalty <- expand_grid(penalty = exp(seq(-6, 8, length.out = 100)))
 ### Tune a LASSO regression
 
 Use `linear_reg()`, `set_engine("glmnet")`, and `tune_grid()` to fit your LASSO models.
+
 ```{r}
-fits_lasso <- 
+fits_lasso <- xfun::cache_rds(
+  expr = {
+   
+    linear_reg(
+      penalty = tune(),   
+      mixture = 1        
+    ) |>
+      set_engine("glmnet") |>
+      
+     
+      tune_grid(
+        preprocessor = rec,       
+        resamples = splits_boot,  
+        grid = grid_penalty,     
+        metrics = metric_set(rmse)
+      )
+  },
+  rerun = rerun_setting,         
+  dir = "cache/001/",             
+  file = "fits_lasso"
+)
 ```
 
 ### Plot performance in the validation sets by hyperparameter
 
 Use the `plot_hyperparameters()` function in `fun_ml.R` or your own code.
-```{r}
 
+```{r}
+plot_hyperparameters(fits_lasso, hp1 = "penalty",metric = "rmse") 
 ```
 
 ### Fit your best configuration in data_trn
 
 Use your best configuration (i.e., your best $\lambda$ value) to fit a model in the full training set (`data_trn`) using `select_best()`.
+
 ```{r}
-fit_lasso <- 
+fit_lasso <- linear_reg(penalty = select_best(fits_lasso)$penalty, mixture = 1) |> set_engine("glmnet") |>   fit(sale_price ~ ., data = feat_trn)
+  
 ```
 
 ### Examine parameter estimates
 
 ```{r}
-
+fit_lasso |> 
+  tidy() |> 
+  print(n = 21)
 ```
 
-
-### Get RMSE in train & test 
+### Get RMSE in train & test
 
 Use `rmse_vec()` to get error in `feat_trn`.
-```{r}
 
+```{r}
+lasso_trn_rmse <- rmse_vec(
+  feat_trn$sale_price,
+  predict(fit_lasso, feat_trn)$.pred
+)
+
+lasso_trn_rmse
 ```
 
 Use `rmse_vec()` to get error in `feat_test`.
-```{r}
 
+```{r}
+lasso_test_rmse <- rmse_vec(
+  feat_test$sale_price,
+  predict(fit_lasso, feat_test)$.pred
+)
+
+lasso_test_rmse
 ```
 
 Get number of features.
+
 ```{r}
+lasso_n_feat <- fit_lasso |> 
+  tidy() |> 
+  filter(estimate != 0 & term != "(Intercept)") |> 
+  nrow()
 
+lasso_n_feat
 ```
-
 
 Add to `track_rmse`.
+
 ```{r}
+track_rmse <- add_row(
+  track_rmse,
+  model = "LASSO",
+  rmse_trn = lasso_trn_rmse,
+  rmse_test = lasso_test_rmse,
+  n_features = lasso_n_feat
+)
 
+track_rmse
 ```
-
 
 > How does performance compare in training and test for LASSO? **Type your response between the asterisks below.**
 
-*Type your response here*
+*For the LASSO model, the training RMSE is 24,873 and the test RMSE is 27,998. The gap between training and test performance is much smaller than in the OLS model. Although LASSO has a higher training RMSE than OLS (meaning it fits the training data less closely), its test RMSE is relatively similar to OLS. This suggests that LASSO reduces overfitting by shrinking coefficients and simplifying the model. Overall, LASSO sacrifices some training accuracy in exchange for more stable generalization performance.*
 
 > How many features were retained (i.e., parameter estimates not dropped to zero) in this model? How does this compare to the OLS linear regression? **Type your response between the asterisks below.**
 
-*Type your response here*
+*The LASSO model retained 69 features, compared to 268 features in the OLS model. This represents a substantial reduction in model complexity. Unlike OLS, which keeps nearly all predictors, LASSO sets many coefficients exactly to zero, effectively performing variable selection. As a result, LASSO produces a much more parsimonious model while maintaining comparable test performance.*
 
------
+------------------------------------------------------------------------
 
 ## Part 3: Fitting an Elastic Net regression
 
 ### Set up a hyperparameter grid
 
-Now we'll need to tune both the mixture hyperparameter ($\alpha$) and the penalty hyperparameter ($\lambda$). 
+Now we'll need to tune both the mixture hyperparameter ($\alpha$) and the penalty hyperparameter ($\lambda$).
+
 ```{r}
 grid_glmnet <- expand_grid(penalty = exp(seq(-10, 11, length.out = 250)),
                            mixture = seq(0, 1, length.out = 11))
@@ -283,69 +441,128 @@ grid_glmnet <- expand_grid(penalty = exp(seq(-10, 11, length.out = 250)),
 ### Tune an elasticnet regression
 
 Use `linear_reg()`, `set_engine("glmnet")`, and `tune_grid()` to fit your LASSO models.
+
 ```{r}
-fits_glmnet <- 
+fits_glmnet <- xfun::cache_rds(
+  expr = {
+    linear_reg(
+      penalty = tune(),   
+      mixture = tune()      
+    ) |>
+      set_engine("glmnet") |>
+      tune_grid(
+        preprocessor = rec,       
+        resamples = splits_boot,  
+        grid = grid_glmnet,     
+        metrics = metric_set(rmse)
+      )
+  },
+  rerun = rerun_setting,         
+  dir = "cache/002/",             
+  file = "fits_glmnet"
+)
 ```
 
 ### Plot performance in the validation sets by hyperparameter
 
 Use the `plot_hyperparameters()` function or your own code.
-```{r}
 
+```{r}
+plot_hyperparameters(fits_glmnet, hp1 = "penalty", hp2 = "mixture", metric = "rmse")
 ```
 
 ### Fit your best configuration in training data
 
 Use your best configuration (i.e., your best combination of $\alpha$ & $\lambda$ values) to fit a model in the full training set (`data_trn`) using `select_best()`.
+
 ```{r}
-fit_glmnet <-
+
+fit_glmnet <- linear_reg(
+  penalty = select_best(fits_glmnet)$penalty,
+  mixture = select_best(fits_glmnet)$mixture
+) |>
+  set_engine("glmnet") |>
+  fit(sale_price ~ ., data = feat_trn)
 ```
 
 ### Examine parameter estimates
 
 ```{r}
-
+fit_glmnet |> tidy() |> print(n = 21)
 ```
 
-### Get RMSE in train & test  
+### Get RMSE in train & test
 
 Use `rmse_vec()` to get error in `feat_trn`.
+
 ```{r}
+# Train RMSE
+glmnet_trn_rmse <- rmse_vec(
+  feat_trn$sale_price,
+  predict(fit_glmnet, feat_trn)$.pred
+)
+glmnet_trn_rmse
 
 ```
 
 Use `rmse_vec()` to get error in `feat_test`.
+
 ```{r}
 
+# Test RMSE
+glmnet_test_rmse <- rmse_vec(
+  feat_test$sale_price,
+  predict(fit_glmnet, feat_test)$.pred
+)
+glmnet_test_rmse
 ```
 
 Get number of features.
-```{r}
 
+```{r}
+glmnet_n_feat <- fit_glmnet |> 
+  tidy() |> 
+  filter(estimate != 0 & term != "(Intercept)") |> 
+  nrow()
+glmnet_n_feat
 ```
 
-
 Add to `track_rmse`.
-```{r}
 
+```{r}
+track_rmse <- add_row(
+  track_rmse,
+  model = "ElasticNet",
+  rmse_trn = glmnet_trn_rmse,
+  rmse_test = glmnet_test_rmse,
+  n_features = glmnet_n_feat
+)
+
+track_rmse
 ```
 
 > How does performance compare in training and test for glmnet? **Type your response between the asterisks.**
 
-*Type your response here*
+*For the Elastic Net (glmnet) model, the training RMSE is 24,331 and the test RMSE is 30,393. Although the training error is lower than LASSO, the test error is the highest among the three models. The gap between training and test performance is substantial, indicating that this configuration of Elastic Net does not generalize as well as the others. Despite regularization, the model appears to retain too much flexibility, leading to poorer test performance compared to both OLS and LASSO.*
 
 > How many features were retained (i.e., parameter estimates not dropped to zero) in this model? How does this compare to the OLS linear regression? Type your response between the asterisks.
 
-*Type your response here*
+*The Elastic Net model retained 296 features, which is even more than the OLS model (268 features). This suggests that the selected mixture value likely leaned more toward ridge regression behavior, which shrinks coefficients but does not set many exactly to zero. As a result, Elastic Net in this case did not substantially reduce model complexity compared to OLS and therefore did not provide strong variable selection benefits like LASSO did.*
 
-> Looking back across the OLS linear regression, the LASSO regression, and the elastic net regression, what comparisons can you make about performance in training, performance in test, evidence of overfitting, etc.? Which model configuration would you select and why? 
+> Looking back across the OLS linear regression, the LASSO regression, and the elastic net regression, what comparisons can you make about performance in training, performance in test, evidence of overfitting, etc.? Which model configuration would you select and why?
 
 **Type your response between the asterisks.**
 
-*Type your response here*
+Across the three models, OLS achieves the lowest training RMSE, indicating the best fit to the training data. However, it shows a large increase in error on the test set, suggesting clear overfitting due to the high number of predictors and lack of regularization.
+
+LASSO has higher training error but similar test error compared to OLS, with a much smaller gap between training and test performance. It dramatically reduces the number of features (69 vs. 268), providing a more parsimonious model and better control of overfitting.
+
+Elastic Net, in this case, performs worse on the test set than both OLS and LASSO, despite having a training error similar to LASSO. It retains the largest number of features (296), suggesting limited variable selection and reduced generalization performance.
+
+Based on these results, I would select the LASSO model. It provides comparable test performance to OLS while greatly reducing model complexity and showing less evidence of overfitting. It achieves a better balance between bias and variance and produces a more interpretable and stable model.
 
 ## Save & render
 
-Save this .qmd file with your last name at the end (e.g., hw_unit_06_regularization_janssen). Make sure you changed "Your name here" at the top of the file to be your own name. Render the file to .html, and upload the rendered file to Canvas. 
+Save this .qmd file with your last name at the end (e.g., hw_unit_06_regularization_janssen). Make sure you changed "Your name here" at the top of the file to be your own name. Render the file to .html, and upload the rendered file to Canvas.
 
 **Way to go!!**
